@@ -33,13 +33,16 @@ class SplitManager:
         val.index = val.slide_id
         test.index = test.slide_id
 
-        train["train"] = True
-        val["val"] = True
-        test["test"] = True
+        # Initialize boolean columns directly to avoid FutureWarning
+        train["train"] = pd.Series(True, dtype=bool, index=train.index)
+        val["val"] = pd.Series(True, dtype=bool, index=val.index)
+        test["test"] = pd.Series(True, dtype=bool, index=test.index)
         
         data = pd.concat([train, val, test])
         data = data[["train", "val", "test", "label"]]
-        data = data.fillna(False)
+        # Fill NaN values using where to avoid FutureWarning from fillna downcasting
+        for col in ["train", "val", "test"]:
+            data[col] = data[col].where(data[col].notna(), False).astype(bool)
         data.index.name = None
         return data
 
@@ -69,7 +72,6 @@ class SplitManager:
                                     ).reset_index()
             summary = summary[["label", "train", "val", "test"]]
             summary = summary.rename(columns={"label": ""})
-            print(summary)
             summary.to_csv(f"{output_path}/splits_{i}_descriptor.csv", index=False)
 
     def __load_dataset(self):

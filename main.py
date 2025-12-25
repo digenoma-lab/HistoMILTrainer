@@ -54,16 +54,21 @@ if __name__ == "__main__":
     dataset_csv = dataset_csv.merge(splits, on="slide_id")
     print(dataset_csv)
     print("Create datasets")
-    train_loader = DataLoader(H5Dataset(features_path, dataset_csv, "train"),
+    from histomil.datasets import variable_patches_collate_fn
+    
+    train_loader = DataLoader(H5Dataset(features_path, dataset_csv, "train", variable_patches=True),
                             batch_size=BATCH_SIZE, shuffle=True,
+                            collate_fn=variable_patches_collate_fn,
                             worker_init_fn=lambda _: np.random.seed(SEED))
 
-    val_loader = DataLoader(H5Dataset(features_path, dataset_csv, "val"), 
+    val_loader = DataLoader(H5Dataset(features_path, dataset_csv, "val", variable_patches=True), 
                             batch_size=BATCH_SIZE, shuffle=True,
+                            collate_fn=variable_patches_collate_fn,
                             worker_init_fn=lambda _: np.random.seed(SEED))
 
-    test_loader = DataLoader(H5Dataset(features_path, dataset_csv, "test"),
+    test_loader = DataLoader(H5Dataset(features_path, dataset_csv, "test", variable_patches=True),
                             batch_size=BATCH_SIZE, shuffle=False,
+                            collate_fn=variable_patches_collate_fn,
                             worker_init_fn=lambda _: np.random.seed(SEED))
 
     print("Slides train:",len(train_loader))

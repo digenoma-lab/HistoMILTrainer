@@ -23,7 +23,7 @@ class SplitManager:
         """Extracts train, test and val from the same dataset"""
         data = self.__load_dataset()
         grouped = data.groupby(by=["case_id", "label"], as_index=False).first()[["case_id", "label"]]
-        train_grouped, test_grouped = train_test_split(grouped, test_size=self.test_frac)
+        train_grouped, test_grouped = train_test_split(grouped, test_size=self.test_frac, random_state=42)
         train_grouped, val_grouped = train_test_split(train_grouped, test_size=self.test_frac)
         train = train_grouped.merge(data, on=["case_id", "label"])
         val = val_grouped.merge(data, on=["case_id", "label"])

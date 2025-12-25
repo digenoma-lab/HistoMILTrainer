@@ -31,21 +31,60 @@ def train(model, train_loader, val_loader, results_dir, learning_rate,
         train_loss = 0.
         train_preds = []
         train_labels = []
-        for features, labels in tqdm(train_loader, desc=f"Epoch {epoch+1}"):
-            features, labels = features.to(device), labels.to(device)
-            labels = labels.long()  # CrossEntropyLoss requires long type labels
-            optimizer.zero_grad() #Initialize gradientes
-            logits = model(features)
-            loss = criterion(logits, labels) #Calculate loss
-            total_loss = loss
-            train_loss += total_loss.item()
-            # Save metrics
-            probs = torch.softmax(logits, dim=1)
-            train_preds.extend(probs[:, 1].detach().cpu().numpy())
-            train_labels.extend(labels.detach().cpu().numpy())
+        for batch in tqdm(train_loader, desc=f"Epoch {epoch+1}"):
+            # Handle variable patches: batch is a list of (features, label) tuples
+            if isinstance(batch, list):
+                # Variable patches mode: process each slide individually
+                optimizer.zero_grad()
+                batch_loss = 0.
+                
+                # Process each slide and accumulate gradients
+                for features, label in batch:
+                    features = features.to(device)  # Shape: (num_patches, feature_dim)
+                    label = label.to(device).long().unsqueeze(0)  # Shape: (1,)
+                    
+                    # Add batch dimension: (1, num_patches, feature_dim)
+                    features = features.unsqueeze(0)
+                    
+                    # Forward pass
+                    logits = model(features)  # Shape: (1, 2)
+                    loss = criterion(logits, label)
+                    
+                    # Scale loss by batch size for proper averaging
+                    loss = loss / len(batch)
+                    batch_loss += loss.item() * len(batch)  # Store unscaled for reporting
+                    
+                    # Backward pass (accumulates gradients)
+                    loss.backward()
+                    
+                    # Collect predictions
+                    probs = torch.softmax(logits, dim=1)
+                    train_preds.append(probs[0, 1].detach().cpu().item())
+                    train_labels.append(label[0].detach().cpu().item())
+                
+                # Update weights once after processing all slides in batch
+                optimizer.step()
+                
+                # Average loss across slides in batch
+                total_loss = batch_loss / len(batch)
+                train_loss += total_loss
+            else:
+                # Legacy mode: fixed number of patches (original behavior)
+                features, labels = batch
+                features, labels = features.to(device), labels.to(device)
+                labels = labels.long()  # CrossEntropyLoss requires long type labels
+                optimizer.zero_grad() #Initialize gradientes
+                logits = model(features)
+                loss = criterion(logits, labels) #Calculate loss
+                total_loss = loss
+                train_loss += total_loss.item()
+                # Save metrics
+                probs = torch.softmax(logits, dim=1)
+                train_preds.extend(probs[:, 1].detach().cpu().numpy())
+                train_labels.extend(labels.detach().cpu().numpy())
 
-            loss.backward() #Backprop
-            optimizer.step() #Optimizer step
+                loss.backward() #Backprop
+                optimizer.step() #Optimizer step
 
         train_loss /= len(train_loader)
 
@@ -59,19 +98,47 @@ def train(model, train_loader, val_loader, results_dir, learning_rate,
         val_labels = []
 
         with torch.no_grad(): #No grad
-            for features, labels in tqdm(val_loader, desc="Validation"):
-                features, labels = features.to(device), labels.to(device)
-                features = features.squeeze(0) #Adds a batch dimension
-                logits = model(features)
-                #Reshape logits and labels for comparison
-                logits = logits.view(-1, logits.size(-1))
-                labels = labels.view(-1).long()
-                loss = criterion(logits, labels) #Calculate Cross entropy loss
-                total_loss = loss
-                val_loss += total_loss.item()
-                probs = torch.softmax(logits, dim=1)
-                val_preds.extend(probs[:, 1].cpu().numpy())
-                val_labels.extend(labels.cpu().numpy())
+            for batch in tqdm(val_loader, desc="Validation"):
+                # Handle variable patches: batch is a list of (features, label) tuples
+                if isinstance(batch, list):
+                    # Variable patches mode: process each slide individually
+                    batch_loss = 0.
+                    for features, label in batch:
+                        features = features.to(device)  # Shape: (num_patches, feature_dim)
+                        label = label.to(device).long().unsqueeze(0)  # Shape: (1,)
+                        
+                        # Add batch dimension: (1, num_patches, feature_dim)
+                        features = features.unsqueeze(0)
+                        
+                        # Forward pass
+                        logits = model(features)  # Shape: (1, 2)
+                        loss = criterion(logits, label)
+                        
+                        batch_loss += loss.item()
+                        
+                        # Collect predictions
+                        probs = torch.softmax(logits, dim=1)
+                        val_preds.append(probs[0, 1].cpu().item())
+                        val_labels.append(label[0].cpu().item())
+                    
+                    # Average loss across slides in batch
+                    total_loss = batch_loss / len(batch)
+                    val_loss += total_loss
+                else:
+                    # Legacy mode: fixed number of patches
+                    features, labels = batch
+                    features, labels = features.to(device), labels.to(device)
+                    features = features.squeeze(0) #Adds a batch dimension
+                    logits = model(features)
+                    #Reshape logits and labels for comparison
+                    logits = logits.view(-1, logits.size(-1))
+                    labels = labels.view(-1).long()
+                    loss = criterion(logits, labels) #Calculate Cross entropy loss
+                    total_loss = loss
+                    val_loss += total_loss.item()
+                    probs = torch.softmax(logits, dim=1)
+                    val_preds.extend(probs[:, 1].cpu().numpy())
+                    val_labels.extend(labels.cpu().numpy())
 
         val_loss /= len(val_loader)
         val_auc = roc_auc_score(val_labels, val_preds)
@@ -110,23 +177,53 @@ def test(model, test_loader):
     total = 0
 
     with torch.no_grad():
-        for features, labels in tqdm(test_loader, desc="Testing"):
-            features, labels = features.to(device), labels.to(device)
-            features = features.squeeze(0)  # CLAM asume batch size 1
-            logits = model(features)
-            logits = logits.view(-1, logits.size(-1)) #Reshape
-            labels = labels.view(-1).long()
-            probs = torch.softmax(logits, dim=1)  # logits: [1, 2]
-            predicted = torch.argmax(probs, dim=1)  # predicted: [1]
+        for batch in tqdm(test_loader, desc="Testing"):
+            # Handle variable patches: batch is a list of (features, label) tuples
+            if isinstance(batch, list):
+                # Variable patches mode: process each slide individually
+                for features, label in batch:
+                    features = features.to(device)  # Shape: (num_patches, feature_dim)
+                    label = label.to(device).long().unsqueeze(0)  # Shape: (1,)
+                    
+                    # Add batch dimension: (1, num_patches, feature_dim)
+                    features = features.unsqueeze(0)
+                    
+                    # Forward pass
+                    logits = model(features)  # Shape: (1, 2)
+                    probs = torch.softmax(logits, dim=1)
+                    predicted = torch.argmax(probs, dim=1)  # predicted: [1]
+                    
+                    correct += (predicted == label).sum().item()
+                    total += label.size(0)
+                    
+                    all_outputs.append(probs[0, 1].cpu().item())  # prob. clase 1
+                    all_labels.append(label[0].cpu().item())
+            else:
+                # Legacy mode: fixed number of patches
+                features, labels = batch
+                features, labels = features.to(device), labels.to(device)
+                features = features.squeeze(0)  # CLAM asume batch size 1
+                logits = model(features)
+                logits = logits.view(-1, logits.size(-1)) #Reshape
+                labels = labels.view(-1).long()
+                probs = torch.softmax(logits, dim=1)  # logits: [1, 2]
+                predicted = torch.argmax(probs, dim=1)  # predicted: [1]
 
-            correct += (predicted == labels).sum().item()
-            total += labels.size(0)
+                correct += (predicted == labels).sum().item()
+                total += labels.size(0)
 
-            all_outputs.append(probs[:, 1].cpu().numpy())  # prob. clase 1
-            all_labels.append(labels.cpu().numpy())
+                all_outputs.append(probs[:, 1].cpu().numpy())  # prob. clase 1
+                all_labels.append(labels.cpu().numpy())
 
-    all_outputs = np.concatenate(all_outputs)
-    all_labels = np.concatenate(all_labels)
+    # Convert lists to numpy arrays (handles both scalars and arrays)
+    if len(all_outputs) > 0 and isinstance(all_outputs[0], (int, float, np.number)):
+        # List contains scalars (variable patches mode)
+        all_outputs = np.array(all_outputs)
+        all_labels = np.array(all_labels)
+    else:
+        # List contains arrays (legacy mode)
+        all_outputs = np.concatenate(all_outputs)
+        all_labels = np.concatenate(all_labels)
 
     auc = roc_auc_score(all_labels, all_outputs)
 

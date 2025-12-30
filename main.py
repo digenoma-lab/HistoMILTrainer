@@ -89,9 +89,10 @@ if __name__ == "__main__":
                                          val_loader, results_dir,
                                          args.learning_rate,
                                          args.fold,
-                                         class_weights = class_weights)
+                                         class_weights = class_weights,
+                                         model_name = args.model)
     print("Testing")
-    test_metrics = test(trained_model, test_loader)
+    test_metrics = test(trained_model, test_loader, class_weights = class_weights, model_name = args.model)
     print("Exporting metrics")
     train_metrics = pd.json_normalize(train_metrics)
     test_metrics = pd.json_normalize(test_metrics)

@@ -9,7 +9,7 @@ from tqdm import tqdm
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def train(model, train_loader, val_loader, results_dir, learning_rate, fold,
-        bag_weight = 0.7, epochs = 20, patience = 2, stop_epoch = 2, class_weights = None):
+        bag_weight = 0.7, epochs = 20, patience = 2, stop_epoch = 2, class_weights = None, model_name = None):
     """
     Train function
     """
@@ -46,8 +46,10 @@ def train(model, train_loader, val_loader, results_dir, learning_rate, fold,
                 features = features.unsqueeze(0)
                 
                 # Forward pass
-                logits, attn = model(features)  # Shape: (1, 2)
-
+                if model_name == "clam":
+                    logits, attn = model(features, label, criterion)  # Shape: (1, 2)
+                else:
+                    logits, attn = model(features)
                 loss = criterion(logits["logits"], label)
                 
                 # Scale loss by batch size for proper averaging
@@ -92,7 +94,10 @@ def train(model, train_loader, val_loader, results_dir, learning_rate, fold,
                     features = features.unsqueeze(0)
                     
                     # Forward pass
-                    logits, attn = model(features)  # Shape: (1, 2)
+                    if model_name == "clam":
+                        logits, attn = model(features, label, criterion)  # Shape: (1, 2)
+                    else:
+                        logits, attn = model(features)
                     loss = criterion(logits["logits"], label)
                     
                     batch_loss += loss.item()
@@ -135,8 +140,14 @@ def train(model, train_loader, val_loader, results_dir, learning_rate, fold,
     model.load_state_dict(torch.load(f"{results_dir}/{fold}-checkpoint.pt"))
     return model, best_metrics
 
-def test(model, test_loader):
+def test(model, test_loader, class_weights = None, model_name = None):
     """Test function: Evaluates clam model with optimal threshold selection by F1 macro."""
+    if class_weights is not None:
+        weights_tensor = torch.tensor(class_weights, dtype=torch.float).to(device)
+        criterion = nn.CrossEntropyLoss(weight = weights_tensor)
+        print(criterion)
+    else:
+        criterion = nn.CrossEntropyLoss()
     model.eval()
     all_labels, all_outputs = [], []
     correct = 0
@@ -154,7 +165,10 @@ def test(model, test_loader):
                 features = features.unsqueeze(0)
                 
                 # Forward pass
-                logits, attn = model(features)  # Shape: (1, 2)
+                if model_name == "clam":
+                    logits, attn = model(features, label, criterion)  # Shape: (1, 2)
+                else:
+                    logits, attn = model(features)
                 probs = torch.softmax(logits["logits"], dim=1)
                 predicted = torch.argmax(probs, dim=1)  # predicted: [1]
                 

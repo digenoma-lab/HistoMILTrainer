@@ -29,15 +29,19 @@ HistoMIL offers a streamlined framework to train MIL architectures on histology 
 ## Installation
 
 ```bash
-# Clone the repository
-git clone <repository-url>
+# Clone the MIL-Lab repository to access to different architectures
+git clone https://github.com/mahmoodlab/MIL-Lab
+cd MIL-Lab
+pip install -e . # Will install all dependences
+pip install git+https://github.com/oval-group/smooth-topk  # Required for CLAM
+cd ..
+# Clone HistoMIL to train the architectures
+git clone https://github.com/digenoma-lab/HistoMIL
 cd HistoMIL
-
-# Install dependencies
-pip install -r requirements.txt
+pip install -e . # Will install this package
 ```
 
-**Note**: HistoMIL requires MIL-Lab to be installed and accessible. Make sure MIL-Lab is properly configured in your environment.
+**Note**: HistoMIL requires MIL-Lab to be installed and accessible. Make sure MIL-Lab is properly configured in your environment. MIL-Lab is not available on PyPI and must be installed separately.
 
 ## Quick Start
 
@@ -168,16 +172,6 @@ The `make_splits.py` script generates:
 - `splits_{fold}_bool.csv`: Boolean splits for each fold (train/val/test columns)
 - `splits_{fold}_descriptor.csv`: Summary statistics for each split
 
-## Requirements
-
-- Python 3.7+
-- PyTorch
-- NumPy
-- Pandas
-- scikit-learn
-- tqdm
-- h5py
-- MIL-Lab (for model architectures)
 
 **Note**: Make sure MIL-Lab is properly installed and accessible in your Python path. The `import_model` function relies on `src.builder.create_model` from MIL-Lab.
 

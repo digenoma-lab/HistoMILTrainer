@@ -7,7 +7,7 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 import numpy as np
-from histomil import H5Dataset, seed_torch, get_embed_dim, get_weights, train, test, import_model
+from histomil import H5Dataset, seed_torch, get_weights, train, test, import_model
 from histomil.datasets import variable_patches_collate_fn
 
 SEED = 2
@@ -34,12 +34,11 @@ if __name__ == "__main__":
     split_dir = os.path.realpath(args.splits_dir)
     csv_path = os.path.realpath(args.csv_path)
     results_dir = os.path.realpath(args.results_dir)
-    embed_dim = get_embed_dim(args.pretrained_model)
 
     if args.model == "clam": #CLAM needs it
         BATCH_SIZE = 1
 
-    print("Using:", args.pretrained_model, "with embedding size:", embed_dim)
+    print("Using:", args.pretrained_model, "With: ", args.model)
     os.makedirs(results_dir, exist_ok=True)
 
     dataset_csv = pd.read_csv(csv_path)

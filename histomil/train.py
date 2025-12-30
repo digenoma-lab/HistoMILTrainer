@@ -179,14 +179,9 @@ def test(model, test_loader, class_weights = None, model_name = None):
                 all_labels.append(label[0].cpu().item())
 
     # Convert lists to numpy arrays (handles both scalars and arrays)
-    if len(all_outputs) > 0 and isinstance(all_outputs[0], (int, float, np.number)):
-        # List contains scalars (variable patches mode)
-        all_outputs = np.array(all_outputs)
-        all_labels = np.array(all_labels)
-    else:
-        # List contains arrays (legacy mode)
-        all_outputs = np.concatenate(all_outputs)
-        all_labels = np.concatenate(all_labels)
+    # List contains scalars (variable patches mode)
+    all_outputs = np.array(all_outputs)
+    all_labels = np.array(all_labels)
 
     auc = roc_auc_score(all_labels, all_outputs)
 

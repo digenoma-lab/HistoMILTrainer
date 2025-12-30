@@ -55,45 +55,6 @@ def seed_torch(seed=7):
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
 
-def use_mlflow(args, params, metrics):
-    """Use mlflow to save results and compare"""
-    home_path = os.path.expanduser(args.mlflow_dir)
-    print(f"Using mlflow to save results: {args.mlflow_dir}")
-    mlflow.set_tracking_uri(f"file:{home_path}")
-    mlflow.set_experiment(args.mlflow_exp)
-    with mlflow.start_run() as run:
-        mlflow.log_params(params)
-        mlflow.log_metric("train AUC", metrics["train_auc"].values[0])
-        mlflow.log_metric("train ACC", metrics["train_acc"].values[0])
-        mlflow.log_metric("val AUC", metrics["val_auc"].values[0])
-        mlflow.log_metric("val ACC", metrics["val_acc"].values[0])
-        mlflow.log_metric("test AUC", metrics["test_auc"].values[0])
-        mlflow.log_metric("test ACC", metrics["test_acc"].values[0])
-        model_path = f"{args.results_dir}/checkpoint.pt"
-        mlflow.log_artifact(model_path, artifact_path="model")
-    print(f"Saved to {args.mlflow_dir}, {args.mlflow_exp}")
-
-def get_embed_dim(patch_encoder):
-    embed_dims = {
-        "uni": 1024,
-        "uni_v2": 1536,
-        "conch_v1": 512,
-        "conch_v15": 768,
-        "virchow": 2560,
-        "virchow2": 2560,
-        "phikon": 768,
-        "phikon_v2": 1024,
-        "ctranspath": 768,
-        "resnet50": 1024,
-    }
-
-    if patch_encoder not in embed_dims:
-        raise ValueError(
-            f"Patch encoder '{patch_encoder}' no reconocido. Opciones válidas:\n{list(embed_dims.keys())}"
-        )
-
-    return embed_dims[patch_encoder]
-
 def get_weights(serie):
     labels = serie.index
     counts = serie.values

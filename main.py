@@ -7,7 +7,8 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 import numpy as np
-from histomil import H5Dataset, seed_torch, get_embed_dim, get_weights, train, test, ABMIL
+from histomil import H5Dataset, seed_torch, get_embed_dim, get_weights, train, test, import_model
+from histomil.datasets import variable_patches_collate_fn
 
 SEED = 2
 BATCH_SIZE = 16
@@ -26,7 +27,7 @@ if __name__ == "__main__":
     parser.add_argument("--mlflow_exp", type=str, default=None)
     parser.add_argument("--epochs", type=int, default = 3)
     parser.add_argument("--learning_rate", type=float, default = 4e-4)
-    parser.add_argument("--model", type=str, default="CLAM")
+    parser.add_argument("--model", type=str, default="abmil")
     parser.add_argument("--use_class_weights", type=bool, default=True)
     args = parser.parse_args()
     
@@ -36,6 +37,10 @@ if __name__ == "__main__":
     csv_path = os.path.realpath(args.csv_path)
     results_dir = os.path.realpath(args.results_dir)
     embed_dim = get_embed_dim(args.pretrained_model)
+
+    if args.model == "clam": #CLAM needs it
+        BATCH_SIZE = 1
+
     print("Using:", args.pretrained_model, "with embedding size:", embed_dim)
     os.makedirs(results_dir, exist_ok=True)
 
@@ -45,6 +50,7 @@ if __name__ == "__main__":
 
     descriptors = pd.read_csv(f"{split_dir}/splits_{args.fold}_descriptor.csv", index_col=0)
     print(descriptors)
+
     if args.use_class_weights:
         class_weights = get_weights(descriptors.train)
         print("Using class_weights:", class_weights)
@@ -54,7 +60,6 @@ if __name__ == "__main__":
     dataset_csv = dataset_csv.merge(splits, on="slide_id")
     print(dataset_csv)
     print("Create datasets")
-    from histomil.datasets import variable_patches_collate_fn
     
     train_loader = DataLoader(H5Dataset(features_path, dataset_csv, "train", variable_patches=True),
                             batch_size=BATCH_SIZE, shuffle=True,
@@ -76,13 +81,14 @@ if __name__ == "__main__":
     print("Slides test:", len(test_loader))
     print("Importing model")
 
-    model = ABMIL(input_feature_dim = embed_dim).to(device)
-    
+    model = import_model(args.model, args.pretrained_model).to(device)
+
     print(model)
     print("Training")
     trained_model, train_metrics = train(model, train_loader,
                                          val_loader, results_dir,
                                          args.learning_rate,
+                                         args.fold,
                                          class_weights = class_weights)
     print("Testing")
     test_metrics = test(trained_model, test_loader)

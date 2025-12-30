@@ -22,7 +22,7 @@ if __name__ == "__main__":
     parser.add_argument("--splits_dir", type=str, required=True)
     parser.add_argument("--csv_path", type=str, required=True)
     parser.add_argument("--results_dir", type=str, default="./temp_dir/")
-    parser.add_argument("--pretrained_model", type=str, default = "uni_v2")
+    parser.add_argument("--feature_extractor", type=str, default = "uni_v2")
     parser.add_argument("--epochs", type=int, default = 3)
     parser.add_argument("--learning_rate", type=float, default = 4e-4)
     parser.add_argument("--model", type=str, default="abmil")
@@ -38,7 +38,7 @@ if __name__ == "__main__":
     if args.model == "clam": #CLAM needs it
         BATCH_SIZE = 1
 
-    print("Using:", args.pretrained_model, "With: ", args.model)
+    print("Using:", args.feature_extractor, "With: ", args.model)
     os.makedirs(results_dir, exist_ok=True)
 
     dataset_csv = pd.read_csv(csv_path)
@@ -78,14 +78,14 @@ if __name__ == "__main__":
     print("Batches test:", len(test_loader))
     print("Importing model")
 
-    model = import_model(args.model, args.pretrained_model).to(device)
+    model = import_model(args.model, args.feature_extractor).to(device)
 
     print(model)
     print("Training")
     trained_model, train_metrics = train(model, train_loader,
                                          val_loader, results_dir,
                                          args.learning_rate,
-                                         args.fold,
+                                         args.fold, args.epochs,
                                          class_weights = class_weights,
                                          model_name = args.model)
     print("Testing")
@@ -97,9 +97,3 @@ if __name__ == "__main__":
 
     results_path = f"{results_dir}/{args.fold}.csv"
     metrics.to_csv(results_path, index=False)
-    params = {
-        "dataset": os.path.basename(args.csv_path),
-        "fold": args.fold,
-        "pretrained_model": args.pretrained_model,
-        "embed_dim": embed_dim
-    }

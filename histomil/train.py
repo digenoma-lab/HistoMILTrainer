@@ -8,8 +8,7 @@ from tqdm import tqdm
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-def train(model, train_loader, val_loader, results_dir, learning_rate, fold,
-        bag_weight = 0.7, epochs = 20, patience = 2, stop_epoch = 2, class_weights = None, model_name = None):
+def train(model, train_loader, val_loader, results_dir, learning_rate, fold, epochs, patience = 2, stop_epoch = 2, class_weights = None, model_name = None):
     """
     Train function
     """

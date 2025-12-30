@@ -76,9 +76,9 @@ if __name__ == "__main__":
                             collate_fn=variable_patches_collate_fn,
                             worker_init_fn=lambda _: np.random.seed(SEED))
 
-    print("Slides train:",len(train_loader))
-    print("Slides val:", len(val_loader))
-    print("Slides test:", len(test_loader))
+    print("Batches train:",len(train_loader))
+    print("Batches val:", len(val_loader))
+    print("Batches test:", len(test_loader))
     print("Importing model")
 
     model = import_model(args.model, args.pretrained_model).to(device)

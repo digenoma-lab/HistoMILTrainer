@@ -188,12 +188,18 @@ if __name__ == "__main__":
         ).to(device)
         mil.load_state_dict(torch.load(row["model_checkpoint"]))
 
-        test_metrics = test(
+        test_metrics, y_preds, y_true = test(
             mil, test_loader, class_weights=class_weights, model_name=args.mil
         )
         test_metrics["fold"] = fold_idx
         test_results.append(test_metrics)
         print(f"Fold {fold_idx}: {test_metrics}")
+
+        predictions = pd.DataFrame()
+        predictions["y_pred"] = y_preds
+        predictions["y_true"] = y_true
+        
+        predictions.to_csv(f"{results_dir}/predictions_{fold_idx}.csv", index=False)
 
     test_results_df = pd.DataFrame(test_results)
     print("Test results:\n", test_results_df)

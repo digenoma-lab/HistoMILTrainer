@@ -208,4 +208,4 @@ def test(model, test_loader, class_weights = None, model_name = None):
         "test_acc": accuracy,
         "f1_macro": f1_macro
     }
-    return metrics
+    return metrics, all_outputs, all_labels

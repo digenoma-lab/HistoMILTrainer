@@ -40,7 +40,7 @@ def parse_args():
     parser.add_argument("--csv_path", type=str, required=True)
     parser.add_argument("--results_dir", type=str, default="./temp_dir/")
     parser.add_argument("--feature_extractor", type=str, default="uni_v2")
-    parser.add_argument("--epochs", type=int, default=2)
+    parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--learning_rate", type=float, default=4e-4)
     parser.add_argument("--mil", type=str, default="abmil")
     parser.add_argument("--use_class_weights", type=bool, default=True)
@@ -117,7 +117,7 @@ if __name__ == "__main__":
 
     # Grid search: train all param/fold combinations
     grid_search_results = []
-    for params in param_combinations[:3]:
+    for params in param_combinations:
         print(f"Params: {params}")
         for fold in range(args.folds):
             print(f"Fold: {fold}")

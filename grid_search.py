@@ -206,3 +206,5 @@ if __name__ == "__main__":
     test_results_df["mil"] = args.mil
     print("Test results:\n", test_results_df)
     test_results_df.to_csv(f"{results_dir}/test_results_{args.feature_extractor}.{args.mil}.csv", index=False)
+
+    json.dump(clean_params, open(f"{results_dir}/best_params_{args.feature_extractor}.{args.mil}.json", "w"))

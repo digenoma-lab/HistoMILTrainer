@@ -17,6 +17,8 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Scientific/Engineering :: Medical Science Apps.",
 ]
+packages = [{include = "histomil"}]
+include = ["histomil/configs/*.json"]
 
 # Note: All runtime dependencies (torch, numpy, pandas, scikit-learn, tqdm, h5py, etc.)
 # are provided by MIL-Lab, which must be installed first (See README.md)
@@ -41,9 +43,6 @@ mypy = "^0.991"
 # histomil-splits = "histomil.cli:splits"
 histomil-splits = "histomil.cli:make_splits"
 histomil-grid = "histomil.cli:grid_search"
-
-[tool.setuptools.package-data]
-configs = ["configs/*.json"]
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

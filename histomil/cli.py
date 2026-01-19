@@ -1,10 +1,7 @@
 """Command-line interface for HistoMILTrainer."""
 import argparse
-
-from histomil import SplitManager, GridSearch
-
-
 def make_splits():
+    from histomil.splits import SplitManager
     """CLI entry point for making splits."""
     parser = argparse.ArgumentParser(description="HistoMIL Make Splits Script")
     parser.add_argument("--folds", type=int, default=10)
@@ -27,6 +24,7 @@ def make_splits():
 
 
 def grid_search():
+    from histomil.grid_search import GridSearch
     """CLI entry point for grid search."""
     parser = argparse.ArgumentParser(description="MIL Grid Search")
     parser.add_argument("--folds", type=int, default=10)

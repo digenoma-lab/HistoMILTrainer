@@ -42,6 +42,9 @@ mypy = "^0.991"
 histomil-splits = "histomil.cli:make_splits"
 histomil-grid = "histomil.cli:grid_search"
 
+[tool.setuptools.package-data]
+configs = ["configs/*.json"]
+
 [build-system]
 requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"

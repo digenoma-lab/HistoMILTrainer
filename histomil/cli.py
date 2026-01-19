@@ -37,7 +37,7 @@ def grid_search():
     parser.add_argument("--learning_rate", type=float, default=4e-4)
     parser.add_argument("--mil", type=str, default="abmil")
     parser.add_argument("--use_class_weights", type=bool, default=True)
-    parser.add_argument("--grid_params", type=str, default="configs/abmil.json")
+    parser.add_argument("--grid_params", type=str, default=None)
     args = parser.parse_args()
 
     # Create GridSearch instance and run
@@ -52,7 +52,7 @@ def grid_search():
         learning_rate=args.learning_rate,
         mil=args.mil,
         use_class_weights=args.use_class_weights,
-        grid_params_path=args.grid_params,
+        grid_params_path=args.grid_params if args.grid_params else f"configs/{args.mil}.json",
     )
     grid_search.run()
 

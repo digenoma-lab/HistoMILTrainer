@@ -23,9 +23,7 @@ classifiers = [
 # are provided by MIL-Lab, which must be installed first (See README.md)
 
 [tool.poetry.dependencies]
-python = "^3.9"
-# MIL-Lab provides: torch, numpy, pandas, scikit-learn, tqdm, h5py, etc.
-# Additional dependencies that may not be in MIL-Lab:
+python = "3.10"
 seaborn = "*"
 matplotlib = "*"
 

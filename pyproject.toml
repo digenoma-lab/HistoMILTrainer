@@ -22,7 +22,7 @@ classifiers = [
 # are provided by MIL-Lab, which must be installed first (See README.md)
 
 [tool.poetry.dependencies]
-python = "3.10"
+python = "^3.10"
 src = {git = "https://github.com/GabrielCabas/MIL-Lab.git"} #Update when PR is merged
 smooth-topk = {git = "https://github.com/oval-group/smooth-topk.git"} # Required for CLAM
 seaborn = "*"

@@ -33,8 +33,12 @@ jobs:
         uses: snok/install-poetry@v1
         with:
           version: latest
-          virtualenvs-create: false
+          virtualenvs-create: true
           virtualenvs-in-project: false
+
+      - name: Configure Poetry to use system Python
+        run: |
+          poetry env use python
 
       - name: Install dependencies with Poetry
         run: |

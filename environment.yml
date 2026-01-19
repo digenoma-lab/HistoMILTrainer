@@ -7,7 +7,6 @@ dependencies:
   - git
   - pip:
     - git+https://github.com/GabrielCabas/MIL-Lab.git #Replace it with original when the PR is merged
-    - git+https://github.com/digenoma-lab/HistoMILTrainer.git
     - pandas
     - scikit-learn
     - tqdm

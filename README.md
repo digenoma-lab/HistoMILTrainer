@@ -28,20 +28,52 @@ HistoMILTrainer offers a streamlined framework to train MIL architectures on his
 
 ## Installation
 
+HistoMILTrainer requires **Python 3.10**. Choose one of the following installation methods:
+
+### Option 1: Using Conda (Recommended)
+
 ```bash
-# Clone the MIL-Lab repository to access to different architectures
-git clone https://github.com/mahmoodlab/MIL-Lab
-cd MIL-Lab
-pip install -e . # Will install all dependences
-pip install git+https://github.com/oval-group/smooth-topk  # Required for CLAM
-cd ..
-# Clone HistoMILTrainer to train the architectures
+# Clone HistoMILTrainer
 git clone https://github.com/digenoma-lab/HistoMILTrainer
 cd HistoMILTrainer
-pip install -e . # Will install this package
+
+# Create conda environment with all dependencies
+conda env create -f environment.yml
+conda activate histomil
+
+# Install HistoMILTrainer in editable mode
+pip install -e .
 ```
 
-**Note**: HistoMILTrainer requires MIL-Lab to be installed and accessible. Make sure MIL-Lab is properly configured in your environment. MIL-Lab is not available on PyPI and must be installed separately.
+The `environment.yml` file includes:
+- Python 3.10
+- MIL-Lab (from GitHub)
+- smooth-topk (required for CLAM, from GitHub)
+- All required dependencies (seaborn, matplotlib, pytest, etc.)
+
+### Option 2: Using pip/Poetry
+
+```bash
+# Clone HistoMILTrainer
+git clone https://github.com/digenoma-lab/HistoMILTrainer
+cd HistoMILTrainer
+
+# Install with pip (MIL-Lab will be installed automatically as a dependency)
+pip install -e .
+```
+
+**Note**: When installing with pip, dependencies are automatically installed from the `pyproject.toml` configuration. The package will install:
+- MIL-Lab (from GitHub: `https://github.com/GabrielCabas/MIL-Lab.git`)
+- smooth-topk (from GitHub: `https://github.com/oval-group/smooth-topk.git`, required for CLAM)
+- seaborn
+- matplotlib
+- All other dependencies from MIL-Lab (torch, numpy, pandas, scikit-learn, tqdm, h5py, etc.)
+
+### CLAM Support
+
+The `smooth-topk` dependency (required for CLAM architecture) is automatically installed with HistoMILTrainer. No additional installation steps are required.
+
+**Note**: MIL-Lab is not available on PyPI and is installed directly from GitHub. The installation process handles this automatically through the dependency configuration.
 
 ## Quick Start
 
@@ -146,15 +178,20 @@ Use the `--mil` argument to specify the architecture:
 ## Project Structure
 
 ```
-HistoMIL/
+HistoMILTrainer/
 ├── histomil/           # Main library package
 │   ├── models.py       # Model import functions
 │   ├── datasets.py     # Dataset classes
 │   ├── train.py        # Training and evaluation functions
 │   ├── splits.py       # Split management
 │   └── utils.py        # Utility functions
+├── tests/              # Test suite
+│   └── test_import.py  # Import tests
+├── configs/            # Model configuration files
 ├── main.py             # Main training script
 ├── make_splits.py      # Split generation script
+├── environment.yml     # Conda environment configuration
+└── pyproject.toml      # Package metadata and dependencies
 ```
 
 ## Output
@@ -173,7 +210,7 @@ The `make_splits.py` script generates:
 - `splits_{fold}_descriptor.csv`: Summary statistics for each split
 
 
-**Note**: Make sure MIL-Lab is properly installed and accessible in your Python path. The `import_model` function relies on `src.builder.create_model` from MIL-Lab.
+**Note**: MIL-Lab is automatically installed as a dependency when you install HistoMILTrainer. The `import_model` function relies on `src.builder.create_model` from MIL-Lab, which should be available after installation.
 
 ## Citation
 

@@ -269,3 +269,8 @@ If you use HistoMILTrainer in your research, please cite the original MIL-Lab pa
 ## License
 
 See LICENSE file for details.
+
+### Contact
+
+Author: **Gabriel Cabas**  
+For questions or suggestions, please open an *issue* or *pull request* in this repository.

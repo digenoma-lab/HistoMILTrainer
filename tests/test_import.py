@@ -7,6 +7,7 @@ def test_import_histomil():
 
     # Verify that the module has the expected attributes
     assert hasattr(histomil, "SplitManager")
+    assert hasattr(histomil, "GridSearch")
     assert hasattr(histomil, "H5Dataset")
     assert hasattr(histomil, "variable_patches_collate_fn")
     assert hasattr(histomil, "seed_torch")

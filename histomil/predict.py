@@ -5,6 +5,7 @@ import numpy as np
 from tqdm import tqdm
 import pandas as pd
 from torch.utils.data import DataLoader
+from torch.nn import CrossEntropyLoss
 
 from histomil import (
     H5DatasetPredict,
@@ -55,7 +56,12 @@ class Predictor:
                     features = features.to(device)  # Shape: (num_patches, feature_dim)
                     # Add batch dimension: (1, num_patches, feature_dim)
                     features = features.unsqueeze(0)
-                    logits, _ = model(features)
+                    if self.mil == "clam":
+                        logits, _ = model(features, 
+                                          torch.tensor([1]).to(device),
+                                          CrossEntropyLoss().to(device))
+                    else:
+                        logits, _ = model(features)
                     probs = torch.softmax(logits["logits"], dim=1)
                     all_outputs.append(probs[0, 1].cpu().item())  # prob. clase 1
 
@@ -67,13 +73,13 @@ class Predictor:
     def run(self):
         with open(self.params_path, "r") as f:
             params_dict = json.load(f)
-
+        print(params_dict)
         model = import_model(self.mil, self.feature_extractor, **params_dict).to(device)
         model.load_state_dict(torch.load(self.weights_path))
         dataset_df = self._load_data(self.csv_path)
         test_loader = self._create_loader(dataset_df)
         y_prob = self.predict(model, test_loader)
         results_df = pd.DataFrame({"slide_id": dataset_df["slide_id"], "prob": y_prob})
-        results_df["y_pred"] = results_df["prob"].apply(lambda x: 1 if x > 0.5 else 0)
+        results_df["pred"] = results_df["prob"].apply(lambda x: 1 if x > 0.5 else 0)
         results_df.to_csv(self.results_dir + "predictions.csv", index=False)
         return results_df

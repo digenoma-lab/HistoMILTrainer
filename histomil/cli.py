@@ -112,7 +112,7 @@ def predict():
 
 def heatmap():
     """CLI entry point for heatmap."""
-    from histomil.predict import Predictor, HeatmapVisualizer
+    from histomil.heatmap import HeatmapVisualizer
     parser = argparse.ArgumentParser(description="MIL Predict")
     parser.add_argument("--slide_id", type=str, required=True)
     parser.add_argument("--slide_folder", type=str, required=True)

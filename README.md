@@ -25,6 +25,8 @@ HistoMILTrainer offers a streamlined framework to train MIL architectures on his
 - **Class Weighting**: Automatic class weight calculation for imbalanced datasets
 - **Early Stopping**: Prevent overfitting with configurable early stopping
 - **Case-Level Splitting**: Prevents data leakage by splitting at the case level
+- **Inference Pipeline**: Run predictions on new slides with trained models
+- **Attention Heatmap Visualization**: Generate interpretable attention heatmaps overlaid on WSIs
 
 ## Installation
 
@@ -45,7 +47,7 @@ conda activate histomil
 pip install -e .
 ```
 
-After installation, the CLI commands `histomil-splits` and `histomil-grid` will be available in your PATH.
+After installation, the CLI commands `histomil-splits`, `histomil-grid`, `histomil-predict`, and `histomil-heatmap` will be available in your PATH.
 
 The `environment.yml` file includes:
 - Python 3.10
@@ -64,7 +66,7 @@ cd HistoMILTrainer
 pip install -e .
 ```
 
-After installation, the CLI commands `histomil-splits` and `histomil-grid` will be available in your PATH.
+After installation, the CLI commands `histomil-splits`, `histomil-grid`, `histomil-predict`, and `histomil-heatmap` will be available in your PATH.
 
 **Note**: When installing with pip, dependencies are automatically installed from the `pyproject.toml` configuration. The package will install:
 - MIL-Lab (from GitHub: `https://github.com/GabrielCabas/MIL-Lab.git`)
@@ -155,6 +157,8 @@ After installation, the following commands are available:
 
 - `histomil-splits`: Generate train/validation/test splits
 - `histomil-grid`: Perform grid search with hyperparameter optimization
+- `histomil-predict`: Run inference on new slides with a trained model
+- `histomil-heatmap`: Generate attention heatmap visualizations
 
 ### Split Generation (`histomil-splits`)
 
@@ -185,6 +189,69 @@ histomil-grid \
   --grid_params <path>               # Path to grid search parameters JSON (default: configs/abmil.json)
 ```
 
+### Prediction (`histomil-predict`)
+
+Run inference on new slides using a trained model:
+
+```bash
+histomil-predict \
+  --features_folder <path>          # Path to H5 feature files directory (required)
+  --weights_path <path>             # Path to trained model weights (.pt file) (required)
+  --csv_path <path>                 # Path to CSV with slide_id column (required)
+  --params_path <path>              # Path to JSON with model parameters (required)
+  --mil <model_name>                # MIL architecture: abmil, clam, etc. (default: abmil)
+  --feature_extractor <name>        # Feature extractor: virchow2, uni_v2, etc. (default: virchow2)
+  --results_dir <path>              # Output directory for predictions (default: ./)
+  --log_level <level>               # Logging level: DEBUG, INFO, WARNING, ERROR (default: INFO)
+```
+
+**Output:**
+- `predictions.csv`: Contains `slide_id`, `prob` (probability), and `pred` (binary prediction) columns
+- `attention_scores/`: Directory containing H5 files with attention scores for each slide
+
+### Heatmap Visualization (`histomil-heatmap`)
+
+Generate attention heatmap overlays on whole slide images:
+
+```bash
+histomil-heatmap \
+  --slide_id <filename>             # Slide filename (required)
+  --slide_folder <path>             # Directory containing original WSI files (required)
+  --features_folder <path>          # Directory with H5 feature files containing coordinates (required)
+  --attn_scores_folder <path>       # Directory with attention scores H5 files (required)
+  --results_dir <path>              # Output directory for heatmaps (default: ./)
+  --log_level <level>               # Logging level: DEBUG, INFO, WARNING, ERROR (default: INFO)
+```
+
+**Output:**
+- `heatmap_{slide_name}.png`: Attention heatmap visualization overlaid on the WSI thumbnail
+
+**Note:** This module requires [TRIDENT](https://github.com/mahmoodlab/TRIDENT) for WSI handling and visualization.
+
+### Example: Inference and Visualization Workflow
+
+After training, you can run predictions on new data and generate attention heatmaps:
+
+```bash
+# Step 1: Run predictions on new slides
+histomil-predict \
+  --features_folder ./features/ \
+  --weights_path ./results/abmil/0-checkpoint.pt \
+  --csv_path ./data/new_slides.csv \
+  --params_path ./results/abmil/best_params_virchow2.abmil.json \
+  --mil abmil \
+  --feature_extractor virchow2 \
+  --results_dir ./predictions/
+
+# Step 2: Generate heatmap for a specific slide
+histomil-heatmap \
+  --slide_id slide_001.svs \
+  --slide_folder ./slides/ \
+  --features_folder ./features/ \
+  --attn_scores_folder ./predictions/attention_scores/ \
+  --results_dir ./heatmaps/
+```
+
 ### Supported Models
 
 Use the `--mil` argument to specify the architecture:
@@ -211,6 +278,8 @@ HistoMILTrainer/
 │   ├── train.py        # Training and evaluation functions
 │   ├── splits.py       # Split management
 │   ├── grid_search.py  # Grid search class
+│   ├── predict.py      # Inference/prediction functions
+│   ├── heatmap.py      # Attention heatmap visualization
 │   ├── cli.py          # Command-line interface
 │   └── utils.py        # Utility functions
 ├── tests/              # Test suite
@@ -234,6 +303,18 @@ The `histomil-splits` command generates:
 - `dataset.csv`: Processed dataset with case_id, slide_id, and label columns
 - `splits_{fold}_bool.csv`: Boolean splits for each fold (train/val/test columns)
 - `splits_{fold}_descriptor.csv`: Summary statistics for each split
+
+### Prediction Output
+
+The `histomil-predict` command generates:
+- `predictions.csv`: Contains slide_id, probability scores, and binary predictions
+- `attention_scores/`: Directory with H5 files containing attention weights per patch for each slide
+
+### Heatmap Output
+
+The `histomil-heatmap` command generates:
+- `heatmap_{slide_name}.png`: Attention heatmap visualization overlaid on the WSI thumbnail
+- Top 20 patches with highest attention scores are highlighted
 
 ### Grid Search
 

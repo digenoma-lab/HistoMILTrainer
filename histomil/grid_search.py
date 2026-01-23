@@ -8,7 +8,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 import logging
-
+import shutil
 from histomil import (
     H5Dataset,
     seed_torch,
@@ -297,7 +297,13 @@ class GridSearch:
         best_params_file = f"{self.results_dir}/best_params_{self.feature_extractor}.{self.mil}.json"
         self.logger.info(f"Saving best parameters to: {best_params_file}")
         json.dump(clean_params, open(best_params_file, "w"))
-        
+
+        self.logger.info(f"Copying best models to: {self.results_dir}/[fold]-best_model.pt")
+        best_model_file = "_".join( [a + "=" + str(clean_params[a]) for a in clean_params.keys()] ) + "-checkpoint.pt"
+        for fold in range(self.folds):
+            fold_model_file = f"{self.results_dir}/{fold}-{best_model_file}"
+            shutil.copy(fold_model_file, f"{self.results_dir}/{fold}_best_model.pt")
+
         self.logger.info("=" * 60)
         self.logger.info("✓ Grid search completed successfully")
         self.logger.info("=" * 60)

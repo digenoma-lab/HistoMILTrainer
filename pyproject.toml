@@ -27,6 +27,7 @@ include = ["histomil/configs/*.json"]
 python = ">=3.10,<3.11"
 src = {git = "https://github.com/GabrielCabas/MIL-Lab.git"} #Update when PR is merged
 topk = {git = "https://github.com/oval-group/smooth-topk.git"} # Required for CLAM
+trident = {git = "https://github.com/mahmoodlab/TRIDENT.git"}
 seaborn = "*"
 matplotlib = "*"
 

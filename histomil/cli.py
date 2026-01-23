@@ -1,6 +1,7 @@
 """Command-line interface for HistoMILTrainer."""
 import argparse
 import os
+
 def make_splits():
     from histomil.splits import SplitManager
     """CLI entry point for making splits."""
@@ -87,10 +88,10 @@ def grid_search():
     grid_search.run()
 
 def predict():
-    """CLI entry point for grid search."""
+    """CLI entry point for predict."""
     from histomil.predict import Predictor
     parser = argparse.ArgumentParser(description="MIL Predict")
-    parser.add_argument("--features_path", type=str, required=True)
+    parser.add_argument("--features_folder", type=str, required=True)
     parser.add_argument("--weights_path", type=str, required=True)
     parser.add_argument("--csv_path", type=str, required=True)
     parser.add_argument("--results_dir", type=str, default="./")
@@ -101,10 +102,29 @@ def predict():
     predictor = Predictor(
         csv_path=args.csv_path,
         weights_path=args.weights_path,
-        features_path=args.features_path,
+        features_folder=args.features_folder,
         feature_extractor=args.feature_extractor,
         results_dir=args.results_dir,
         mil=args.mil,
         params_path=args.params_path,
     )
     predictor.run()
+
+def heatmap():
+    """CLI entry point for heatmap."""
+    from histomil.predict import Predictor, HeatmapVisualizer
+    parser = argparse.ArgumentParser(description="MIL Predict")
+    parser.add_argument("--slide_id", type=str, required=True)
+    parser.add_argument("--slide_folder", type=str, required=True)
+    parser.add_argument("--features_folder", type=str, required=True)
+    parser.add_argument("--attn_scores_folder", type=str, required=True)
+    parser.add_argument("--results_dir", type=str, default="./")
+    args = parser.parse_args()
+    heatmap_visualizer = HeatmapVisualizer(
+        slide_id=args.slide_id,
+        slide_folder=args.slide_folder,
+        features_folder=args.features_folder,
+        attn_scores_folder=args.attn_scores_folder,
+        results_dir=args.results_dir,
+    )
+    heatmap_visualizer.run()

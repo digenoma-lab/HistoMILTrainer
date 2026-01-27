@@ -6,7 +6,7 @@ dependencies:
   - pip
   - git
   - pip:
-    - git+https://github.com/GabrielCabas/MIL-Lab.git #Replace it with original when the PR is merged
+    - git+https://github.com/mahmoodlab/MIL-Lab.git #Replace it with original when the PR is merged
     - git+https://github.com/oval-group/smooth-topk.git # Required for CLAM
     - seaborn
     - matplotlib

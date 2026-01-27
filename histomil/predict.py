@@ -94,9 +94,13 @@ class Predictor:
                                           return_attention=True)
                     else:
                         logits, attn = model(features, return_attention=True)
+                    attn_scores = attn["attention"].squeeze().cpu().numpy()
+                    if len(attn_scores.shape) == 2:
+                        #It's a geo attention score, must be averaged over the patches
+                        attn_scores = attn_scores.mean(axis = 0)
                     probs = torch.softmax(logits["logits"], dim=1)
                     all_outputs.append(probs[0, 1].cpu().item())  # prob. clase 1
-                    all_attentions.append(attn["attention"].squeeze().cpu().numpy())
+                    all_attentions.append(attn_scores)
                     total_slides += 1
         # Convert lists to numpy arrays (handles both scalars and arrays)
         # List contains scalars (variable patches mode)

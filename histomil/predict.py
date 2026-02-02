@@ -95,8 +95,7 @@ class Predictor:
                     else:
                         logits, attn = model(features, return_attention=True)
                     attn_scores = attn["attention"].squeeze().cpu().numpy()
-                    
-                    if self.mil == "wikg":
+                    if self.mil == "wikg" or self.mil == "transformer":
                         #It's a geo attention score, must be averaged over the patches
                         attn_scores = attn_scores.mean(axis = 0)
                     if self.mil == "dsmil":

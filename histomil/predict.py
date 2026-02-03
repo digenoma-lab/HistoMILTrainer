@@ -101,6 +101,10 @@ class Predictor:
                     if self.mil == "dsmil":
                         # Only keep the attention score for the second class (positive)
                         attn_scores = attn_scores[:, 1]
+                    if self.mil == "transmil":
+                        # Transmil returns a N^2 length array of attention scores.
+                        # We need to crop it to the number of patches.
+                        attn_scores = attn_scores[:features.shape[1]]
                     probs = torch.softmax(logits["logits"], dim=1)
                     all_outputs.append(probs[0, 1].cpu().item())  # prob. clase 1
                     all_attentions.append(attn_scores)

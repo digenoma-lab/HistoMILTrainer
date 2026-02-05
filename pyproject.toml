@@ -25,7 +25,7 @@ include = ["histomil/configs/*.json"]
 
 [tool.poetry.dependencies]
 python = ">=3.10,<3.11"
-src = {git = "https://github.com/mahmoodlab/MIL-Lab.git"}
+src = {git = "https://github.com/GabrielCabas/MIL-Lab.git", branch="bug_attention_returned_false"}
 topk = {git = "https://github.com/oval-group/smooth-topk.git"} # Required for CLAM
 trident = {git = "https://github.com/mahmoodlab/TRIDENT.git"}
 seaborn = "*"

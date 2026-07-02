@@ -7,11 +7,41 @@ import numpy as np
 from tqdm import tqdm
 import os
 import logging
+from pathlib import Path
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-def train(model, train_loader, val_loader, results_dir, learning_rate, fold, epochs, patience = 2,
-    stop_epoch = 2, class_weights = None, model_name = None, params = None):
+def load_pretrained_checkpoint(model, checkpoint_path):
+    """Carga un checkpoint fuente sobre un modelo ya construido."""
+    checkpoint_path = Path(checkpoint_path)
+
+    if not checkpoint_path.is_file():
+        raise FileNotFoundError(
+            f"No existe el checkpoint preentrenado: {checkpoint_path}"
+        )
+
+    device = next(model.parameters()).device
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+
+    if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+        state_dict = checkpoint["model_state_dict"]
+    elif isinstance(checkpoint, dict) and "state_dict" in checkpoint:
+        state_dict = checkpoint["state_dict"]
+    else:
+        state_dict = checkpoint
+
+    if not isinstance(state_dict, dict):
+        raise TypeError(
+            f"Formato de checkpoint no válido: {type(state_dict).__name__}"
+        )
+
+    model.load_state_dict(state_dict, strict=True)
+
+    return checkpoint_path
+
+
+def train_transfer(model, train_loader, val_loader, results_dir, learning_rate, fold, epochs, patience = 2,
+    stop_epoch = 2, class_weights = None, model_name = None, params = None, *, transfer_mode, pretrained_checkpoint=None,):
     """
     Train function
     """
@@ -38,6 +68,34 @@ def train(model, train_loader, val_loader, results_dir, learning_rate, fold, epo
         criterion = nn.CrossEntropyLoss()
         logger.info("Using standard CrossEntropyLoss")
     
+    valid_transfer_modes = {"scratch", "full"}
+
+    if transfer_mode not in valid_transfer_modes:
+        raise ValueError(
+            f"transfer_mode debe ser uno de {sorted(valid_transfer_modes)}. "
+            f"Se recibió: {transfer_mode}"
+        )
+
+    if transfer_mode == "scratch":
+        if pretrained_checkpoint is not None:
+            raise ValueError(
+                "scratch no debe recibir pretrained_checkpoint"
+            )
+
+    elif transfer_mode == "full":
+        if pretrained_checkpoint is None:
+            raise ValueError(
+                "full requiere pretrained_checkpoint"
+            )
+
+        loaded_checkpoint = load_pretrained_checkpoint(
+            model=model,
+            checkpoint_path=pretrained_checkpoint,
+        )
+
+        print(
+            f"Checkpoint preentrenado cargado: {loaded_checkpoint}"
+        )
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
     logger.debug(f"Optimizer: AdamW with lr={learning_rate}")
     

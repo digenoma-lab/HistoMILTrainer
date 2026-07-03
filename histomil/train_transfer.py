@@ -8,6 +8,7 @@ from tqdm import tqdm
 import os
 import logging
 from pathlib import Path
+from histomil.transfer import get_trainable_parameters
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -41,12 +42,13 @@ def load_pretrained_checkpoint(model, checkpoint_path):
 
 
 def train_transfer(model, train_loader, val_loader, results_dir, learning_rate, fold, epochs, patience = 2,
-    stop_epoch = 2, class_weights = None, model_name = None, params = None, *, transfer_mode, pretrained_checkpoint=None,):
+    stop_epoch = 2, class_weights = None, model_name = None, params = None, *, transfer_mode, pretrained_checkpoint=None,
+):
     """
     Train function
     """
     logger = logging.getLogger(__name__)
-    
+
     logger.info("=" * 60)
     logger.info(f"Starting training for fold {fold}")
     logger.info("=" * 60)
@@ -59,7 +61,7 @@ def train_transfer(model, train_loader, val_loader, results_dir, learning_rate, 
     logger.info(f"  - Device: {device}")
     logger.info(f"  - Train batches: {len(train_loader)}")
     logger.info(f"  - Val batches: {len(val_loader)}")
-    
+
     if class_weights is not None:
         weights_tensor = torch.tensor(class_weights, dtype=torch.float).to(device)
         criterion = nn.CrossEntropyLoss(weight = weights_tensor)
@@ -67,7 +69,7 @@ def train_transfer(model, train_loader, val_loader, results_dir, learning_rate, 
     else:
         criterion = nn.CrossEntropyLoss()
         logger.info("Using standard CrossEntropyLoss")
-    
+
     valid_transfer_modes = {"scratch", "full"}
 
     if transfer_mode not in valid_transfer_modes:
@@ -96,9 +98,10 @@ def train_transfer(model, train_loader, val_loader, results_dir, learning_rate, 
         print(
             f"Checkpoint preentrenado cargado: {loaded_checkpoint}"
         )
-    optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
+    trainable_parameters = get_trainable_parameters(model)
+    optimizer = optim.AdamW(trainable_parameters, lr=learning_rate)
     logger.debug(f"Optimizer: AdamW with lr={learning_rate}")
-    
+
     early_stopping = EarlyStopping(patience=patience, stop_epoch=stop_epoch, verbose=True)
     logger.info("Start training")
 
@@ -133,37 +136,37 @@ def train_transfer(model, train_loader, val_loader, results_dir, learning_rate, 
             # Variable patches mode: process each slide individually
             optimizer.zero_grad()
             batch_loss = 0.
-            
+
             # Process each slide and accumulate gradients
             for features, label in batch:
                 features = features.to(device)  # Shape: (num_patches, feature_dim)
                 label = label.to(device).long().unsqueeze(0)  # Shape: (1,)
-                
+
                 # Add batch dimension: (1, num_patches, feature_dim)
                 features = features.unsqueeze(0)
-                
+
                 # Forward pass
                 if model_name in ["clam", "dftd"]:
                     logits, attn = model(features, label, criterion)  # Shape: (1, 2)
                 else:
                     logits, attn = model(features)
                 loss = criterion(logits["logits"], label)
-                
+
                 # Scale loss by batch size for proper averaging
                 loss = loss / len(batch)
                 batch_loss += loss.item() * len(batch)  # Store unscaled for reporting
-                
+
                 # Backward pass (accumulates gradients)
                 loss.backward()
-                
+
                 # Collect predictions
                 probs = torch.softmax(logits["logits"], dim=1)
                 train_preds.append(probs[0, 1].detach().cpu().item())
                 train_labels.append(label[0].detach().cpu().item())
-            
+
             # Update weights once after processing all slides in batch
             optimizer.step()
-            
+
             # Average loss across slides in batch
             total_loss = batch_loss / len(batch)
             train_loss += total_loss
@@ -187,24 +190,24 @@ def train_transfer(model, train_loader, val_loader, results_dir, learning_rate, 
                 for features, label in batch:
                     features = features.to(device)  # Shape: (num_patches, feature_dim)
                     label = label.to(device).long().unsqueeze(0)  # Shape: (1,)
-                    
+
                     # Add batch dimension: (1, num_patches, feature_dim)
                     features = features.unsqueeze(0)
-                    
+
                     # Forward pass
                     if model_name in ["clam", "dftd"]:
                         logits, attn = model(features, label, criterion)  # Shape: (1, 2)
                     else:
                         logits, attn = model(features)
                     loss = criterion(logits["logits"], label)
-                    
+
                     batch_loss += loss.item()
-                    
+
                     # Collect predictions
                     probs = torch.softmax(logits["logits"], dim=1)
                     val_preds.append(probs[0, 1].cpu().item())
                     val_labels.append(label[0].cpu().item())
-                
+
                 # Average loss across slides in batch
                 total_loss = batch_loss / len(batch)
                 val_loss += total_loss
@@ -237,7 +240,7 @@ def train_transfer(model, train_loader, val_loader, results_dir, learning_rate, 
             break
 
     logger.info(f"Loading best model from checkpoint: {output_name}")
-    model.load_state_dict(torch.load(output_name))
+    model.load_state_dict(torch.load(output_name, map_location=device))
     logger.info("=" * 60)
     logger.info(f"✓ Training completed for fold {fold}")
     logger.info(f"Best epoch: {best_metrics['epoch']}, Best val AUC: {best_metrics['val_auc']:.4f}")
@@ -247,12 +250,12 @@ def train_transfer(model, train_loader, val_loader, results_dir, learning_rate, 
 def test(model, test_loader, class_weights = None, model_name = None):
     """Test function: Evaluates clam model with optimal threshold selection by F1 macro."""
     logger = logging.getLogger(__name__)
-    
+
     logger.info("=" * 60)
     logger.info("Starting model evaluation on test set")
     logger.info("=" * 60)
     logger.info(f"Test batches: {len(test_loader)}")
-    
+
     if class_weights is not None:
         weights_tensor = torch.tensor(class_weights, dtype=torch.float).to(device)
         criterion = nn.CrossEntropyLoss(weight = weights_tensor)
@@ -260,7 +263,7 @@ def test(model, test_loader, class_weights = None, model_name = None):
     else:
         criterion = nn.CrossEntropyLoss()
         logger.info("Using standard CrossEntropyLoss")
-    
+
     model.eval()
     all_labels, all_outputs = [], []
     correct = 0
@@ -274,10 +277,10 @@ def test(model, test_loader, class_weights = None, model_name = None):
             for features, label in batch:
                 features = features.to(device)  # Shape: (num_patches, feature_dim)
                 label = label.to(device).long().unsqueeze(0)  # Shape: (1,)
-                
+
                 # Add batch dimension: (1, num_patches, feature_dim)
                 features = features.unsqueeze(0)
-                
+
                 # Forward pass
                 if model_name in ["clam", "dftd"]:
                     logits, attn = model(features, label, criterion)  # Shape: (1, 2)
@@ -285,10 +288,10 @@ def test(model, test_loader, class_weights = None, model_name = None):
                     logits, attn = model(features)
                 probs = torch.softmax(logits["logits"], dim=1)
                 predicted = torch.argmax(probs, dim=1)  # predicted: [1]
-                
+
                 correct += (predicted == label).sum().item()
                 total += label.size(0)
-                
+
                 all_outputs.append(probs[0, 1].cpu().item())  # prob. clase 1
                 all_labels.append(label[0].cpu().item())
 
@@ -296,13 +299,13 @@ def test(model, test_loader, class_weights = None, model_name = None):
     # List contains scalars (variable patches mode)
     all_outputs = np.array(all_outputs)
     all_labels = np.array(all_labels)
-    
+
     logger.info(f"Computing metrics on {len(all_labels)} test samples")
     auc = roc_auc_score(all_labels, all_outputs)
     pred_labels = (all_outputs >= 0.5).astype(int)
     accuracy = accuracy_score(all_labels, pred_labels)
     f1_macro = f1_score(all_labels, pred_labels, average='macro')
-    
+
     logger.info(f"Test accuracy: {correct}/{total} = {correct/total:.4f}")
 
     metrics = {
@@ -310,10 +313,10 @@ def test(model, test_loader, class_weights = None, model_name = None):
         "test_acc": accuracy,
         "f1_macro": f1_macro
     }
-    
+
     logger.info("=" * 60)
     logger.info("✓ Test evaluation completed")
     logger.info(f"Test metrics: AUC={auc:.4f}, Acc={accuracy:.4f}, F1={f1_macro:.4f}")
     logger.info("=" * 60)
-    
+
     return metrics, all_outputs, all_labels

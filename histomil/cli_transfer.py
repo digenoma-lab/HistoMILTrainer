@@ -19,37 +19,11 @@ def grid_search_transfer():
     parser.add_argument("--splits_dir", type=str, required=True)
     parser.add_argument("--csv_path", type=str, required=True)
     parser.add_argument("--results_dir", type=str, required=True)
-
-    parser.add_argument(
-        "--feature_extractor",
-        type=str,
-        required=True,
-        choices=["uni_v2", "virchow2"],
-    )
-
+    parser.add_argument("--feature_extractor", type=str, required=True)
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--learning_rate", type=float, default=4e-4)
-
-    parser.add_argument(
-        "--mil",
-        type=str,
-        required=True,
-        choices=[
-            "abmil",
-            "clam",
-            "dsmil",
-            "dftd",
-            "ilra",
-            "rrt",
-            "transformer",
-            "transmil",
-            "wikg",
-        ],
-    )
-
-    parser.add_argument(
-        "--use_class_weights",
-        action=argparse.BooleanOptionalAction,
+    parser.add_argument("--mil", type=str, required=True)
+    parser.add_argument("--use_class_weights",      action=argparse.BooleanOptionalAction,
         default=True,
     )
 

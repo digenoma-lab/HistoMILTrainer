@@ -72,4 +72,3 @@ filterwarnings = [
     "ignore::FutureWarning:timm.*",
     "ignore::DeprecationWarning:torch_geometric.*",
 ]
-

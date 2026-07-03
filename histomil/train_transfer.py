@@ -8,7 +8,7 @@ from tqdm import tqdm
 import os
 import logging
 from pathlib import Path
-from histomil.transfer import get_trainable_parameters
+from histomil.transfer import (configure_head_only, configure_partial, count_parameters, get_trainable_parameter_names, get_trainable_parameters, unfreeze_all_parameters,)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -42,7 +42,8 @@ def load_pretrained_checkpoint(model, checkpoint_path):
 
 
 def train_transfer(model, train_loader, val_loader, results_dir, learning_rate, fold, epochs, patience = 2,
-    stop_epoch = 2, class_weights = None, model_name = None, params = None, *, transfer_mode, pretrained_checkpoint=None,
+    stop_epoch = 2, class_weights = None, model_name = None, params = None, *, transfer_mode,
+    pretrained_checkpoint=None, partial_unfreeze_modules=2,
 ):
     """
     Train function
@@ -70,37 +71,75 @@ def train_transfer(model, train_loader, val_loader, results_dir, learning_rate, 
         criterion = nn.CrossEntropyLoss()
         logger.info("Using standard CrossEntropyLoss")
 
-    valid_transfer_modes = {"scratch", "full"}
-
-    if transfer_mode not in valid_transfer_modes:
-        raise ValueError(
-            f"transfer_mode debe ser uno de {sorted(valid_transfer_modes)}. "
-            f"Se recibió: {transfer_mode}"
-        )
-
     if transfer_mode == "scratch":
         if pretrained_checkpoint is not None:
-            raise ValueError(
-                "scratch no debe recibir pretrained_checkpoint"
-            )
+            raise ValueError("scratch no debe recibir pretrained_checkpoint")
 
-    elif transfer_mode == "full":
+        unfreeze_all_parameters(model)
+        logger.info("Modelo inicializado desde cero; todos los parámetros entrenables.")
+
+    elif transfer_mode == "head_only":
         if pretrained_checkpoint is None:
-            raise ValueError(
-                "full requiere pretrained_checkpoint"
-            )
+            raise ValueError("head_only requiere pretrained_checkpoint")
 
         loaded_checkpoint = load_pretrained_checkpoint(
             model=model,
             checkpoint_path=pretrained_checkpoint,
         )
+        trainable_modules = configure_head_only(model=model, num_classes=2)
 
-        print(
-            f"Checkpoint preentrenado cargado: {loaded_checkpoint}"
+        logger.info("Checkpoint cargado: %s", loaded_checkpoint)
+        logger.info("Cabezas clasificadoras entrenables: %s", trainable_modules)
+
+    elif transfer_mode == "partial":
+        if pretrained_checkpoint is None:
+            raise ValueError("partial requiere pretrained_checkpoint")
+
+        loaded_checkpoint = load_pretrained_checkpoint(
+            model=model,
+            checkpoint_path=pretrained_checkpoint,
         )
+        trainable_modules = configure_partial(
+            model=model,
+            num_classes=2,
+            unfreeze_modules=partial_unfreeze_modules,
+        )
+
+        logger.info("Checkpoint cargado: %s", loaded_checkpoint)
+        logger.info("Módulos entrenables en partial: %s", trainable_modules)
+
+    elif transfer_mode == "full":
+        if pretrained_checkpoint is None:
+            raise ValueError("full requiere pretrained_checkpoint")
+
+        loaded_checkpoint = load_pretrained_checkpoint(
+            model=model,
+            checkpoint_path=pretrained_checkpoint,
+        )
+        unfreeze_all_parameters(model)
+
+        logger.info("Checkpoint cargado: %s", loaded_checkpoint)
+        logger.info("Todos los parámetros quedaron entrenables.")
+
+    else:
+        raise ValueError(
+            "transfer_mode debe ser 'scratch', 'head_only', 'partial' o 'full'. "
+            f"Se recibió: {transfer_mode}"
+        )
+    parameter_counts = count_parameters(model)
+    trainable_names = get_trainable_parameter_names(model)
     trainable_parameters = get_trainable_parameters(model)
+
+    logger.info(
+        "Parameters | total=%d | trainable=%d | frozen=%d",
+        parameter_counts["total"],
+        parameter_counts["trainable"],
+        parameter_counts["frozen"],
+    )
+    logger.info("Trainable parameter tensors: %s", trainable_names)
+
     optimizer = optim.AdamW(trainable_parameters, lr=learning_rate)
-    logger.debug(f"Optimizer: AdamW with lr={learning_rate}")
+    logger.debug("Optimizer: AdamW with lr=%s", learning_rate)
 
     early_stopping = EarlyStopping(patience=patience, stop_epoch=stop_epoch, verbose=True)
     logger.info("Start training")

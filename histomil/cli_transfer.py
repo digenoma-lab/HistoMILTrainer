@@ -23,37 +23,12 @@ def grid_search_transfer():
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--learning_rate", type=float, default=4e-4)
     parser.add_argument("--mil", type=str, required=True)
-    parser.add_argument("--use_class_weights",      action=argparse.BooleanOptionalAction,
-        default=True,
-    )
-
-    parser.add_argument(
-        "--model_params_path",
-        type=str,
-        required=True,
-        help="JSON con los parámetros fijos del modelo fuente.",
-    )
-
-    parser.add_argument(
-        "--transfer_mode",
-        type=str,
-        required=True,
-        choices=["scratch", "full"],
-    )
-
-    parser.add_argument(
-        "--pretrained_checkpoint",
-        type=str,
-        default=None,
-        help="Checkpoint fuente requerido para transfer_mode=full.",
-    )
-
-    parser.add_argument(
-        "--log_level",
-        type=str,
-        default="INFO",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-    )
+    parser.add_argument("--use_class_weights", action=argparse.BooleanOptionalAction, default=True,)
+    parser.add_argument("--model_params_path", type=str, required=True,help="JSON con los parámetros fijos del modelo fuente.",)
+    parser.add_argument("--transfer_mode", type=str, required=True, choices=["scratch", "head_only", "partial", "full"], help="Estrategia de transferencia: scratch, head_only, partial o full.",)
+    parser.add_argument("--pretrained_checkpoint", type=str, default=None, help="Checkpoint fuente requerido para transfer_mode=head_only, transfer_mode=partial o transfer_mode=full.",)
+    parser.add_argument("--partial_unfreeze_modules", type=int, default=2, help="Número de módulos a descongelar en el modo parcial.",)
+    parser.add_argument("--log_level", type=str, default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"],)
 
     args = parser.parse_args()
 
@@ -75,6 +50,7 @@ def grid_search_transfer():
         model_params_path=args.model_params_path,
         transfer_mode=args.transfer_mode,
         pretrained_checkpoint=args.pretrained_checkpoint,
+        partial_unfreeze_modules=args.partial_unfreeze_modules,
     )
 
     transfer_training.run()

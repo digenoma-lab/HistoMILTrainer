@@ -221,3 +221,4 @@ logs/
 temp_dir/
 splits/
 data/
+temp/

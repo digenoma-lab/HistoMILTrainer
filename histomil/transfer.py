@@ -53,30 +53,37 @@ def get_frozen_parameter_names(model):
     ]
 
 def find_classification_heads(model, num_classes=2):
-    """Find linear classification heads producing class logits."""
+    """Find classification heads producing class logits."""
     from torch import nn
 
-    heads = [
-        (name, module)
-        for name, module in model.named_modules()
-        if isinstance(module, nn.Linear) and module.out_features == num_classes
-    ]
+    heads = []
+    for name, module in model.named_modules():
+        if isinstance(module, nn.Linear) and module.out_features == num_classes:
+            heads.append((name, module))
+        elif isinstance(module, nn.Conv1d) and module.out_channels == num_classes:
+            heads.append((name, module))
 
     if not heads:
         raise RuntimeError(
-            f"No se encontraron capas nn.Linear con out_features={num_classes}."
+            f"No se encontraron cabezales Linear/Conv1d con salida={num_classes}."
         )
 
     return heads
 
 
+def reset_linear_layer(module):
+    """Reset parameters of a linear layer."""
+    module.reset_parameters()
+
+
 def configure_head_only(model, num_classes=2):
-    """Freeze the model and enable only its classification heads."""
+    """Freeze the model, reset heads and enable only classification heads."""
     freeze_all_parameters(model)
     heads = find_classification_heads(model, num_classes)
 
     trainable_modules = []
     for name, module in heads:
+        reset_linear_layer(module)
         for parameter in module.parameters():
             parameter.requires_grad = True
         trainable_modules.append(name)
@@ -137,21 +144,56 @@ def get_parameterized_leaf_modules(model):
     return modules
 
 
-def configure_partial(model, num_classes=2, unfreeze_modules=2):
-    """Freeze the model and enable heads plus the last parameterized modules."""
+def get_partial_unfreeze_patterns(mil, unfreeze_modules=2):
+    """Return architecture-aware parameter prefixes for partial fine-tuning."""
+    mil = mil.lower()
+    rules = {
+        "abmil": ["model.global_attn", "model.classifier"],
+        "clam": ["model.global_attn", "model.classifier", "model.instance_classifiers"],
+        "dsmil": ["model.i_classifier", "model.b_classifier", "model.classifier"],
+        "dftd": ["model.patch_embed.resBlocks", "model.classifier", "model.attCls"],
+        "ilra": ["model.pooling", "model.classifier"],
+        "rrt": ["model.encoder", "model.classifier"],
+        "transformer": ["model.encoder", "model.transformer", "model.blocks", "model.norm", "model.classifier"],
+        "transmil": ["model.blocks", "model.pos_layer", "model.norm", "model.classifier"],
+        "wikg": ["model.gate_U", "model.gate_V", "model.gate_W", "model.W_head", "model.W_tail", "model.linear1", "model.linear2", "model.readout", "model.norm", "model.classifier"],
+    }
+    return rules.get(mil, ["model.classifier", "model.instance_classifiers"])
+
+
+def configure_partial(model, num_classes=2, unfreeze_modules=2, mil=None):
+    """Freeze the model, reset heads and unfreeze architecture-aware modules."""
     if unfreeze_modules < 1:
         raise ValueError("unfreeze_modules debe ser mayor o igual a 1.")
-
     freeze_all_parameters(model)
-
-    leaf_modules = get_parameterized_leaf_modules(model)
-    selected_modules = leaf_modules[-unfreeze_modules:]
     heads = find_classification_heads(model, num_classes)
-
     trainable_modules = []
-    for name, module in selected_modules + heads:
+    if mil is not None:
+        patterns = get_partial_unfreeze_patterns(mil, unfreeze_modules=unfreeze_modules)
+        matched = []
+        for name, parameter in model.named_parameters():
+            if any(name == pattern or name.startswith(f"{pattern}.") for pattern in patterns):
+                parameter.requires_grad = True
+                matched.append(name)
+        if matched:
+            trainable_modules.extend(sorted(set(name.rsplit(".", 1)[0] for name in matched)))
+        else:
+            leaf_modules = get_parameterized_leaf_modules(model)
+            selected_modules = leaf_modules[-unfreeze_modules:]
+            for name, module in selected_modules:
+                for parameter in module.parameters():
+                    parameter.requires_grad = True
+                trainable_modules.append(name)
+    else:
+        leaf_modules = get_parameterized_leaf_modules(model)
+        selected_modules = leaf_modules[-unfreeze_modules:]
+        for name, module in selected_modules:
+            for parameter in module.parameters():
+                parameter.requires_grad = True
+            trainable_modules.append(name)
+    for name, module in heads:
+        reset_linear_layer(module)
         for parameter in module.parameters():
             parameter.requires_grad = True
         trainable_modules.append(name)
-
     return list(dict.fromkeys(trainable_modules))

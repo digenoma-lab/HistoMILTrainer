@@ -1,6 +1,6 @@
 """Command-line interface for HistoMILTrainer."""
+
 import argparse
-import os
 import logging
 import sys
 
@@ -9,15 +9,16 @@ def setup_logging(level=logging.INFO):
     """Configure logging for the application."""
     logging.basicConfig(
         level=level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S',
-        stream=sys.stdout
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        stream=sys.stdout,
     )
 
 
 def make_splits():
-    from histomil.splits import SplitManager
     """CLI entry point for making splits."""
+    from histomil.splits import SplitManager
+
     parser = argparse.ArgumentParser(description="HistoMIL Make Splits Script")
     parser.add_argument("--folds", type=int, default=10)
     parser.add_argument("--csv_path", type=str, required=True)
@@ -27,10 +28,8 @@ def make_splits():
     parser.add_argument("--output_name", type=str, required=True)
     parser.add_argument("--log_level", type=str, default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     args = parser.parse_args()
-    
-    # Setup logging
-    log_level = getattr(logging, args.log_level.upper())
-    setup_logging(level=log_level)
+
+    setup_logging(level=getattr(logging, args.log_level.upper()))
 
     split_manager = SplitManager(
         csv_path=args.csv_path,
@@ -44,10 +43,11 @@ def make_splits():
 
 
 def grid_search():
+    """CLI entry point for MIL training with optional transfer strategy."""
     from histomil.grid_search import GridSearch
-    """CLI entry point for grid search."""
-    parser = argparse.ArgumentParser(description="MIL Grid Search")
-    parser.add_argument("--folds", type=int, default=10)
+
+    parser = argparse.ArgumentParser(description="MIL Grid Search / Transfer Training")
+    parser.add_argument("--folds", type=int, default=1)
     parser.add_argument("--features_path", type=str, required=True)
     parser.add_argument("--splits_dir", type=str, required=True)
     parser.add_argument("--csv_path", type=str, required=True)
@@ -56,46 +56,37 @@ def grid_search():
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--learning_rate", type=float, default=4e-4)
     parser.add_argument("--mil", type=str, default="abmil")
-    parser.add_argument("--use_class_weights", type=bool, default=True)
+    parser.add_argument("--use_class_weights", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--grid_params", type=str, default=None)
+    parser.add_argument("--transfer_mode", type=str, default="scratch", choices=["scratch", "head_only", "partial"])
+    parser.add_argument("--pretrained_checkpoint", type=str, default=None)
+    parser.add_argument("--partial_unfreeze_modules", type=int, default=2)
     parser.add_argument("--log_level", type=str, default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     args = parser.parse_args()
-    
-    # Setup logging
-    log_level = getattr(logging, args.log_level.upper())
-    setup_logging(level=log_level)
 
-    # Determine grid_params_path: use provided path or default to package config
+    setup_logging(level=getattr(logging, args.log_level.upper()))
+    
+    if args.transfer_mode in ["head_only", "partial"] and not args.pretrained_checkpoint:
+        parser.error("--pretrained_checkpoint is required when --transfer_mode is 'head_only' or 'partial'")
+    
     if args.grid_params:
         grid_params_path = args.grid_params
     else:
-        # Try to get config from installed package or development directory
-        grid_params_path = None
-        
-        # First, try relative path from current directory (for development)
+        import os
         dev_path = os.path.join("histomil", "configs", f"{args.mil}.json")
         if os.path.exists(dev_path):
             grid_params_path = dev_path
         else:
-            # Try from installed package location
-            try:
-                import histomil
-                package_dir = os.path.dirname(histomil.__file__)
-                package_path = os.path.join(package_dir, "configs", f"{args.mil}.json")
-                if os.path.exists(package_path):
-                    grid_params_path = package_path
-                else:
-                    raise FileNotFoundError(
-                        f"Config file {args.mil}.json not found. "
-                        f"Tried: {dev_path}, {package_path}"
-                    )
-            except ImportError:
+            import histomil
+            package_dir = os.path.dirname(histomil.__file__)
+            package_path = os.path.join(package_dir, "configs", f"{args.mil}.json")
+            if not os.path.exists(package_path):
                 raise FileNotFoundError(
-                    f"Config file {args.mil}.json not found and histomil package not installed."
+                    f"Config file {args.mil}.json not found. Tried: {dev_path}, {package_path}"
                 )
+            grid_params_path = package_path
 
-    # Create GridSearch instance and run
-    grid_search = GridSearch(
+    grid_search_runner = GridSearch(
         folds=args.folds,
         features_path=args.features_path,
         splits_dir=args.splits_dir,
@@ -107,12 +98,17 @@ def grid_search():
         mil=args.mil,
         use_class_weights=args.use_class_weights,
         grid_params_path=grid_params_path,
+        transfer_mode=args.transfer_mode,
+        pretrained_checkpoint=args.pretrained_checkpoint,
+        partial_unfreeze_modules=args.partial_unfreeze_modules,
     )
-    grid_search.run()
+    grid_search_runner.run()
+
 
 def predict():
     """CLI entry point for predict."""
     from histomil.predict import Predictor
+
     parser = argparse.ArgumentParser(description="MIL Predict")
     parser.add_argument("--features_folder", type=str, required=True)
     parser.add_argument("--weights_path", type=str, required=True)
@@ -123,10 +119,9 @@ def predict():
     parser.add_argument("--params_path", type=str, required=True)
     parser.add_argument("--log_level", type=str, default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     args = parser.parse_args()
-    
-    # Setup logging
-    log_level = getattr(logging, args.log_level.upper())
-    setup_logging(level=log_level)
+
+    setup_logging(level=getattr(logging, args.log_level.upper()))
+
     predictor = Predictor(
         csv_path=args.csv_path,
         weights_path=args.weights_path,
@@ -138,10 +133,12 @@ def predict():
     )
     predictor.run()
 
+
 def heatmap():
     """CLI entry point for heatmap."""
     from histomil.heatmap import HeatmapVisualizer
-    parser = argparse.ArgumentParser(description="MIL Predict")
+
+    parser = argparse.ArgumentParser(description="MIL Heatmap")
     parser.add_argument("--slide_id", type=str, required=True)
     parser.add_argument("--slide_folder", type=str, required=True)
     parser.add_argument("--features_folder", type=str, required=True)
@@ -149,10 +146,9 @@ def heatmap():
     parser.add_argument("--results_dir", type=str, default="./")
     parser.add_argument("--log_level", type=str, default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     args = parser.parse_args()
-    
-    # Setup logging
-    log_level = getattr(logging, args.log_level.upper())
-    setup_logging(level=log_level)
+
+    setup_logging(level=getattr(logging, args.log_level.upper()))
+
     heatmap_visualizer = HeatmapVisualizer(
         slide_id=args.slide_id,
         slide_folder=args.slide_folder,

@@ -44,7 +44,6 @@ mypy = "^0.991"
 # histomil-splits = "histomil.cli:splits"
 histomil-splits = "histomil.cli:make_splits"
 histomil-grid = "histomil.cli:grid_search"
-histomil-grid-transfer = "histomil.cli_transfer:grid_search_transfer"
 histomil-predict = "histomil.cli:predict"
 histomil-heatmap = "histomil.cli:heatmap"
 

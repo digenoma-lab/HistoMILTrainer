@@ -90,110 +90,180 @@ def configure_head_only(model, num_classes=2):
 
     return trainable_modules
 
-def load_transfer_layers_config(config_path):
-    """Load external layer-selection rules."""
-    path = Path(config_path).expanduser().resolve()
-    if not path.is_file():
-        raise FileNotFoundError(f"No existe la configuración de capas: {path}")
-
-    with path.open("r", encoding="utf-8") as file:
-        config = json.load(file)
-
-    if not isinstance(config, dict) or not config:
-        raise ValueError("La configuración de capas debe ser un objeto JSON no vacío.")
-
-    return config
 
 
-def unfreeze_parameters_by_patterns(model, patterns):
-    """Unfreeze parameters matching module names or prefixes."""
-    if not isinstance(patterns, list) or not patterns:
-        raise ValueError("La lista de patrones no puede estar vacía.")
+def load_req_grid(mil):
+    """Load functional transfer rules for partial mode."""
+    if mil is None:
+        raise ValueError("mil es requerido para cargar req_grid.")
+    req_grid_path = Path(__file__).resolve().parent / "configs" / "req_grid" / f"{mil.lower()}.json"
+    if not req_grid_path.is_file():
+        raise FileNotFoundError(f"No existe req_grid para partial: {req_grid_path}")
+    with req_grid_path.open("r", encoding="utf-8") as file:
+        req_grid = json.load(file)
+    if not isinstance(req_grid, dict):
+        raise ValueError(f"req_grid debe ser un objeto JSON: {req_grid_path}")
+    if "groups" not in req_grid or not isinstance(req_grid["groups"], dict):
+        raise ValueError(f"req_grid debe contener un objeto 'groups': {req_grid_path}")
+    return req_grid
 
-    matched = []
-    for name, parameter in model.named_parameters():
-        if any(name == pattern or name.startswith(f"{pattern}.") for pattern in patterns):
-            parameter.requires_grad = True
-            matched.append(name)
 
-    if not matched:
-        raise RuntimeError(f"No se encontraron parámetros para los patrones: {patterns}")
+def find_matching_layers(parameter_name, layers):
+    return [layer_name for layer_name in layers if parameter_name == layer_name or parameter_name.startswith(f"{layer_name}.")]
 
-    return matched
 
-def get_parameterized_leaf_modules(model):
-    """Return leaf modules that own parameters directly."""
-    modules = []
-
-    for name, module in model.named_modules():
-        if name == "":
+def find_block_indices(model, block_prefix):
+    indices = set()
+    prefix = f"{block_prefix}."
+    for parameter_name, _ in model.named_parameters():
+        if not parameter_name.startswith(prefix):
             continue
+        first = parameter_name[len(prefix):].split(".", 1)[0]
+        if first.isdigit():
+            indices.add(int(first))
+    return sorted(indices)
 
-        has_children = any(True for _ in module.children())
-        has_parameters = any(
-            parameter.numel() > 0
-            for parameter in module.parameters(recurse=False)
+
+
+def parse_binary(value, field_name):
+    """Convert a JSON 0/1 value into bool."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
+    raise ValueError(f"{field_name} debe ser 0 o 1; recibido: {value!r}")
+
+
+def normalize_req_grid(req_grid):
+    """Convert functional groups into layer and repeated-block rules."""
+    layer_rules = {}
+    block_rules = {}
+
+    for group_name, group in req_grid["groups"].items():
+        if not isinstance(group, dict):
+            raise ValueError(f"Grupo inválido en req_grid: {group_name}")
+
+        trainable = parse_binary(
+            group.get("trainable", 0),
+            f"groups.{group_name}.trainable",
         )
 
-        if not has_children and has_parameters:
-            modules.append((name, module))
+        layers = group.get("layers", [])
+        blocks = group.get("blocks", [])
 
-    if not modules:
-        raise RuntimeError("No se encontraron módulos hoja con parámetros.")
+        if not isinstance(layers, list):
+            raise ValueError(f"groups.{group_name}.layers debe ser una lista.")
+        if not isinstance(blocks, list):
+            raise ValueError(f"groups.{group_name}.blocks debe ser una lista.")
 
-    return modules
+        for layer_name in layers:
+            if not isinstance(layer_name, str) or not layer_name:
+                raise ValueError(f"Ruta de capa inválida en grupo {group_name}.")
+            layer_rules[layer_name] = trainable
+
+        for block_prefix in blocks:
+            if not isinstance(block_prefix, str) or not block_prefix:
+                raise ValueError(f"Ruta de bloques inválida en grupo {group_name}.")
+            block_rules[block_prefix] = trainable
+
+    return layer_rules, block_rules
 
 
-def get_partial_unfreeze_patterns(mil, unfreeze_modules=2):
-    """Return architecture-aware parameter prefixes for partial fine-tuning."""
-    mil = mil.lower()
-    rules = {
-        "abmil": ["model.global_attn", "model.classifier"],
-        "clam": ["model.global_attn", "model.classifier", "model.instance_classifiers"],
-        "dsmil": ["model.i_classifier", "model.b_classifier", "model.classifier"],
-        "dftd": ["model.patch_embed.resBlocks", "model.classifier", "model.attCls"],
-        "ilra": ["model.pooling", "model.classifier"],
-        "rrt": ["model.encoder", "model.classifier"],
-        "transformer": ["model.encoder", "model.transformer", "model.blocks", "model.norm", "model.classifier"],
-        "transmil": ["model.blocks", "model.pos_layer", "model.norm", "model.classifier"],
-        "wikg": ["model.gate_U", "model.gate_V", "model.gate_W", "model.W_head", "model.W_tail", "model.linear1", "model.linear2", "model.readout", "model.norm", "model.classifier"],
-    }
-    return rules.get(mil, ["model.classifier", "model.instance_classifiers"])
+def apply_layer_rules(model, layer_rules):
+    matched_layers = {layer_name: 0 for layer_name in layer_rules}
 
+    for parameter_name, parameter in model.named_parameters():
+        parameter.requires_grad = False
+        matches = find_matching_layers(parameter_name, layer_rules)
+
+        if matches:
+            for layer_name in matches:
+                matched_layers[layer_name] += 1
+
+            selected_layer = max(matches, key=len)
+            parameter.requires_grad = layer_rules[selected_layer]
+
+    return matched_layers
+
+
+def apply_block_rules(model, block_rules):
+    matched_blocks = {}
+
+    for block_prefix, trainable in block_rules.items():
+        block_indices = find_block_indices(model, block_prefix)
+        matched_blocks[block_prefix] = len(block_indices)
+
+        if not block_indices:
+            continue
+
+        prefix = f"{block_prefix}."
+
+        for parameter_name, parameter in model.named_parameters():
+            if parameter_name.startswith(prefix):
+                parameter.requires_grad = trainable
+
+    return matched_blocks
+
+
+def apply_req_grid(model, req_grid):
+    full_finetune = parse_binary(
+        req_grid.get("full_finetune", 0),
+        "full_finetune",
+    )
+    strict = parse_binary(
+        req_grid.get("strict", 1),
+        "strict",
+    )
+
+    if full_finetune:
+        unfreeze_all_parameters(model)
+        trainable_names = get_trainable_parameter_names(model)
+
+        if not trainable_names:
+            raise RuntimeError("El modelo no contiene parámetros entrenables.")
+
+        return trainable_names
+
+    layer_rules, block_rules = normalize_req_grid(req_grid)
+    matched_layers = apply_layer_rules(model, layer_rules)
+    matched_blocks = apply_block_rules(model, block_rules)
+
+    missing_layers = [
+        layer_name
+        for layer_name, count in matched_layers.items()
+        if count == 0
+    ]
+    missing_blocks = [
+        block_prefix
+        for block_prefix, count in matched_blocks.items()
+        if count == 0
+    ]
+
+    if strict and (missing_layers or missing_blocks):
+        raise RuntimeError(
+            "req_grid apunta a capas o bloques inexistentes. "
+            f"missing_layers={missing_layers}; "
+            f"missing_blocks={missing_blocks}"
+        )
+
+    trainable_names = get_trainable_parameter_names(model)
+
+    if not trainable_names:
+        raise RuntimeError(
+            "req_grid dejó el modelo sin parámetros entrenables."
+        )
+
+    return trainable_names
 
 def configure_partial(model, num_classes=2, unfreeze_modules=2, mil=None):
-    """Freeze the model, reset heads and unfreeze architecture-aware modules."""
-    if unfreeze_modules < 1:
-        raise ValueError("unfreeze_modules debe ser mayor o igual a 1.")
+    """Configure partial transfer using functional req_grid groups."""
     freeze_all_parameters(model)
-    heads = find_classification_heads(model, num_classes)
-    trainable_modules = []
-    if mil is not None:
-        patterns = get_partial_unfreeze_patterns(mil, unfreeze_modules=unfreeze_modules)
-        matched = []
-        for name, parameter in model.named_parameters():
-            if any(name == pattern or name.startswith(f"{pattern}.") for pattern in patterns):
-                parameter.requires_grad = True
-                matched.append(name)
-        if matched:
-            trainable_modules.extend(sorted(set(name.rsplit(".", 1)[0] for name in matched)))
-        else:
-            leaf_modules = get_parameterized_leaf_modules(model)
-            selected_modules = leaf_modules[-unfreeze_modules:]
-            for name, module in selected_modules:
-                for parameter in module.parameters():
-                    parameter.requires_grad = True
-                trainable_modules.append(name)
-    else:
-        leaf_modules = get_parameterized_leaf_modules(model)
-        selected_modules = leaf_modules[-unfreeze_modules:]
-        for name, module in selected_modules:
-            for parameter in module.parameters():
-                parameter.requires_grad = True
-            trainable_modules.append(name)
-    for name, module in heads:
-        reset_linear_layer(module)
-        for parameter in module.parameters():
-            parameter.requires_grad = True
-        trainable_modules.append(name)
-    return list(dict.fromkeys(trainable_modules))
+    req_grid = load_req_grid(mil)
+    trainable_names = apply_req_grid(model, req_grid)
+
+    for head_name, head_module in find_classification_heads(model, num_classes):
+        if any(parameter.requires_grad for parameter in head_module.parameters()):
+            reset_linear_layer(head_module)
+
+    trainable_modules = sorted(set(name.rsplit(".", 1)[0] for name in trainable_names))
+    return trainable_modules

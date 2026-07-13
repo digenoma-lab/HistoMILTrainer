@@ -1,0 +1,31 @@
+{
+  "_comment": "Uso: full_finetune=0 aplica entrenamiento parcial según groups; full_finetune=1 entrena todo el modelo desde el checkpoint. En cada grupo, trainable=1 entrena sus capas y trainable=0 las congela. strict=1 falla si una ruta no existe y strict=0 la ignora.",
+  "full_finetune": 0,
+  "strict": 1,
+  "groups": {
+    "classifier": {
+      "trainable": 1,
+      "layers": [
+        "model.classifier"
+      ]
+    },
+    "normalization": {
+      "trainable": 1,
+      "layers": [
+        "model.norm"
+      ]
+    },
+    "input_projection": {
+      "trainable": 1,
+      "layers": [
+        "model.patch_embed"
+      ]
+    },
+    "context_blocks": {
+      "trainable": 1,
+      "blocks": [
+        "model.blocks"
+      ]
+    }
+  }
+}

@@ -1,6 +1,6 @@
 # HistoMILTrainer
 
-A library for training Multi-Instance Learning (MIL) architectures from [MIL-Lab](https://github.com/mahmoodlab/MIL-Lab) on histology datasets. HistoMILTrainer provides a unified interface to train and evaluate various state-of-the-art MIL models for whole slide image (WSI) analysis.
+A library for training Multi-Instance Learning (MIL) architectures from [MIL-Lab](https://github.com/mahmoodlab/MIL-Lab) on histology datasets. HistoMILTrainer provides a unified interface to train and evaluate various state-of-the-art MIL models for whole slide image (WSI) analysis. It also supports transfer learning from previously trained MIL checkpoints.
 
 ## Overview
 
@@ -21,6 +21,7 @@ HistoMILTrainer offers a streamlined framework to train MIL architectures on his
 - **Unified Training Interface**: Train any supported MIL architecture with consistent parameters
 - **Flexible Data Loading**: Support for variable number of patches per slide
 - **Cross-Validation**: Built-in support for k-fold cross-validation
+- **Transfer Learning**: Initialize MIL models from existing checkpoints and control which model components are updated during training
 - **Feature Extraction Integration**: Works seamlessly with pre-extracted patch features (e.g., from TRIDENT)
 - **Class Weighting**: Automatic class weight calculation for imbalanced datasets
 - **Early Stopping**: Prevent overfitting with configurable early stopping
@@ -139,7 +140,30 @@ histomil-grid \
 
 **Note**: The `histomil-grid` command performs grid search across parameter combinations, trains models for all folds, selects the best parameters, and evaluates on the test set. The `--csv_path` should point to the `dataset.csv` file generated in the splits directory (e.g., `./splits/my_task/dataset.csv`).
 
-### 5. Run Multiple Folds (SLURM)
+### 5. Train with Transfer Learning
+
+HistoMILTrainer supports checkpoint-based transfer learning through `histomil-grid`:
+
+- `scratch`: trains the complete model from a random initialization. It can optionally use an existing best-parameters JSON through `--grid_params`.
+- `head_only`: loads a compatible checkpoint and trains only the classification heads.
+- `partial`: loads a compatible checkpoint and applies the standard configuration defined for the selected MIL architecture.
+
+```bash
+histomil-grid \
+  --features_path ./features/ \
+  --splits_dir ./splits/my_task/ \
+  --csv_path ./splits/my_task/dataset.csv \
+  --mil abmil \
+  --feature_extractor uni_v2 \
+  --results_dir ./results/abmil_transfer/ \
+  --grid_params ./previous_results/best_params_uni_v2.abmil.json \
+  --transfer_mode partial \
+  --pretrained_checkpoint ./previous_results/0_best_model.pt
+```
+
+The `--grid_params` argument can be used in every training mode. In `scratch`, it allows a previously selected best-parameters configuration to be reused while the model is still initialized randomly. The `head_only` and `partial` modes additionally require a compatible checkpoint for the same MIL architecture and feature extractor.
+
+### 6. Run Multiple Folds (SLURM)
 
 Use the provided shell scripts for running multiple folds:
 
@@ -186,8 +210,20 @@ histomil-grid \
   --learning_rate <float>           # Learning rate (default: 4e-4)
   --folds <int>                     # Number of cross-validation folds (default: 10)
   --use_class_weights <bool>        # Use class weights (default: True)
-  --grid_params <path>               # Path to grid search parameters JSON (default: configs/abmil.json)
+  --grid_params <path>              # Path to grid search parameters JSON (default: configs/abmil.json)
+  --transfer_mode <mode>            # Training mode: scratch, head_only, partial (default: scratch)
+  --pretrained_checkpoint <path>    # Checkpoint used by head_only or partial
 ```
+
+The `--grid_params` argument defines model and training hyperparameters and can also point to a previously generated best-parameters JSON when using `scratch`.
+
+### Partial Configuration (`histomil/configs/req_grid/`)
+
+The `histomil/configs/req_grid/` directory contains one JSON file for each supported MIL architecture. When `--transfer_mode partial` is selected, HistoMILTrainer automatically loads the file matching the value of `--mil` and applies its standard configuration.
+
+Each JSON defines the groups of layers or blocks that remain trainable or frozen. These files provide a standard starting point and can be modified by the user according to the requirements of a specific experiment. The `full_finetune` option can enable training of the complete checkpoint-loaded model, while `strict` controls validation of the configured module paths.
+
+`--grid_params` and `req_grid` serve different purposes: `--grid_params` defines model hyperparameters, whereas `req_grid` defines which model components are updated in `partial` mode.
 
 ### Prediction (`histomil-predict`)
 
@@ -280,11 +316,13 @@ HistoMILTrainer/
 │   ├── grid_search.py  # Grid search class
 │   ├── predict.py      # Inference/prediction functions
 │   ├── heatmap.py      # Attention heatmap visualization
+│   ├── transfer.py     # Transfer learning configuration
 │   ├── cli.py          # Command-line interface
-│   └── utils.py        # Utility functions
+│   ├── utils.py        # Utility functions
+│   └── configs/
+│       └── req_grid/   # Standard partial trainability configuration by MIL architecture
 ├── tests/              # Test suite
 │   └── test_import.py  # Import tests
-├── configs/            # Model configuration files
 ├── environment.yml     # Conda environment configuration
 └── pyproject.toml      # Package metadata and dependencies
 ```
@@ -338,6 +376,7 @@ The `histomil-grid` command performs:
 - Cross-validation training for each combination
 - Selection of best parameters based on validation AUC
 - Testing of best models on test set
+- Optional checkpoint-based training with `scratch`, `head_only`, or `partial`
 - Output of results, predictions, and best parameters
 
 

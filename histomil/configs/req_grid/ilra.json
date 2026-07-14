@@ -1,5 +1,5 @@
 {
-  "_comment": "Uso: full_finetune=0 aplica entrenamiento parcial según groups; full_finetune=1 entrena todo el modelo desde el checkpoint. En cada grupo, trainable=1 entrena sus capas y trainable=0 las congela. strict=1 falla si una ruta no existe y strict=0 la ignora.",
+  "_comment": "Partial fijo por arquitectura MIL. 48.18% del núcleo común queda entrenable; model.patch_embed permanece congelado. La configuración es independiente del feature extractor.",
   "full_finetune": 0,
   "strict": 1,
   "groups": {
@@ -12,14 +12,35 @@
     "pooling": {
       "trainable": 1,
       "layers": [
-        "model.pooling"
+        "model.pooling.mha.ln0",
+        "model.pooling.mha.ln1"
       ]
     },
     "attention_blocks": {
       "trainable": 1,
-      "blocks": [
-        "model.gab_blocks"
-      ]
+      "layers": [
+        "model.gab_blocks.0.project_backward.fc_k",
+        "model.gab_blocks.0.project_backward.fc_o",
+        "model.gab_blocks.0.project_backward.fc_v",
+        "model.gab_blocks.0.project_backward.ln0",
+        "model.gab_blocks.0.project_backward.ln1",
+        "model.gab_blocks.0.project_backward.multihead_attention.out_proj",
+        "model.gab_blocks.0.project_forward.fc_o",
+        "model.gab_blocks.0.project_forward.fc_q",
+        "model.gab_blocks.0.project_forward.gate.0",
+        "model.gab_blocks.0.project_forward.ln0",
+        "model.gab_blocks.0.project_forward.ln1",
+        "model.gab_blocks.0.project_forward.multihead_attention.out_proj",
+        "model.gab_blocks.1.project_backward.fc_k",
+        "model.gab_blocks.1.project_backward.fc_o",
+        "model.gab_blocks.1.project_backward.fc_q",
+        "model.gab_blocks.1.project_backward.fc_v",
+        "model.gab_blocks.1.project_backward.ln0",
+        "model.gab_blocks.1.project_backward.ln1",
+        "model.gab_blocks.1.project_forward.ln0",
+        "model.gab_blocks.1.project_forward.ln1"
+      ],
+      "blocks": []
     }
   }
 }

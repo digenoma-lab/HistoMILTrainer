@@ -1,5 +1,5 @@
 {
-  "_comment": "Uso: full_finetune=0 aplica entrenamiento parcial según groups; full_finetune=1 entrena todo el modelo desde el checkpoint. En cada grupo, trainable=1 entrena sus capas y trainable=0 las congela. strict=1 falla si una ruta no existe y strict=0 la ignora.",
+  "_comment": "Partial fijo por arquitectura MIL. 49.62% del núcleo común queda entrenable; model.patch_embed permanece congelado. La configuración es independiente del feature extractor.",
   "full_finetune": 0,
   "strict": 1,
   "groups": {
@@ -12,7 +12,17 @@
     "context_encoder": {
       "trainable": 1,
       "layers": [
-        "model.encoder"
+        "model.encoder.layer1.attn.res_conv",
+        "model.encoder.layer1.attn.to_out.0",
+        "model.encoder.layer1.attn.to_qkv",
+        "model.encoder.layer1.norm",
+        "model.encoder.layers.0.attn.res_conv",
+        "model.encoder.layers.0.norm",
+        "model.encoder.norm",
+        "model.encoder.pool_fn.attention.attention.2",
+        "model.encoder.pos_embedding.proj",
+        "model.encoder.pos_embedding.proj1",
+        "model.encoder.pos_embedding.proj2"
       ]
     }
   }

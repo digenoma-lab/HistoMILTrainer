@@ -59,7 +59,7 @@ def load_pretrained_checkpoint(model, checkpoint_path):
 
 
 def train(model, train_loader, val_loader, results_dir, learning_rate, fold, epochs, patience = 2,
-    stop_epoch = 2, class_weights = None, model_name = None, params = None, *, transfer_mode,
+    stop_epoch = 2, class_weights = None, model_name = None, params = None, *, transfer_mode="scratch",
     pretrained_checkpoint=None, partial_unfreeze_modules=2,
 ):
     """

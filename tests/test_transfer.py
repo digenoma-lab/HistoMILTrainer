@@ -1,19 +1,9 @@
 """Tests for transfer-learning utilities."""
 
-import importlib.util
-import json
-import tempfile
-from pathlib import Path
-
-import torch
+import pytest
 from torch import nn
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-TRANSFER_PATH = PROJECT_ROOT / "histomil" / "transfer.py"
-
-spec = importlib.util.spec_from_file_location("transfer_utils", TRANSFER_PATH)
-transfer = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(transfer)
+from histomil import transfer
 
 
 class DummyModel(nn.Module):
@@ -28,49 +18,40 @@ class DummyModel(nn.Module):
         self.classifier = nn.Linear(4, 2)
 
 
-def assert_raises(exception_type, function, *args, **kwargs):
-    try:
-        function(*args, **kwargs)
-    except exception_type:
-        return
-    raise AssertionError(f"Se esperaba {exception_type.__name__}")
-
-
 def test_freeze_and_unfreeze():
     model = DummyModel()
+
     transfer.freeze_all_parameters(model)
-    assert all(not p.requires_grad for p in model.parameters())
+    assert all(not parameter.requires_grad for parameter in model.parameters())
 
     transfer.unfreeze_all_parameters(model)
-    assert all(p.requires_grad for p in model.parameters())
+    assert all(parameter.requires_grad for parameter in model.parameters())
 
 
-def test_parameter_counts_and_patterns():
+def test_parameter_counts_and_names():
     model = DummyModel()
-    total = sum(p.numel() for p in model.parameters())
-
     transfer.freeze_all_parameters(model)
-    matched = transfer.unfreeze_parameters_by_patterns(model, ["classifier"])
 
-    assert matched == ["classifier.weight", "classifier.bias"]
+    for parameter in model.classifier.parameters():
+        parameter.requires_grad = True
+
     counts = transfer.count_parameters(model)
-    assert counts["total"] == total
-    assert counts["trainable"] == 10
-    assert counts["frozen"] == total - 10
-
     names = transfer.get_trainable_parameter_names(model)
-    assert names == ["classifier.weight", "classifier.bias"]
-
     parameters = transfer.get_trainable_parameters(model)
+
+    assert counts["total"] == 74
+    assert counts["trainable"] == 10
+    assert counts["frozen"] == 64
+    assert names == ["classifier.weight", "classifier.bias"]
     assert len(parameters) == 2
 
 
-def test_pattern_validation():
+def test_get_trainable_parameters_rejects_fully_frozen_model():
     model = DummyModel()
     transfer.freeze_all_parameters(model)
 
-    assert_raises(RuntimeError, transfer.unfreeze_parameters_by_patterns, model, ["unknown_module"])
-    assert_raises(ValueError, transfer.unfreeze_parameters_by_patterns, model, [])
+    with pytest.raises(RuntimeError, match="does not contain trainable"):
+        transfer.get_trainable_parameters(model)
 
 
 def test_find_classification_heads():
@@ -79,7 +60,7 @@ def test_find_classification_heads():
 
     assert len(heads) == 1
     assert heads[0][0] == "classifier"
-    assert heads[0][1].out_features == 2
+    assert heads[0][1] is model.classifier
 
 
 def test_configure_head_only():
@@ -91,37 +72,124 @@ def test_configure_head_only():
     assert names == ["classifier.weight", "classifier.bias"]
 
 
-def test_configure_partial():
+def test_apply_req_grid():
     model = DummyModel()
-    trainable_modules = transfer.configure_partial(model, num_classes=2, unfreeze_modules=6)
+    req_grid = {
+        "full_finetune": 0,
+        "strict": 1,
+        "groups": {
+            "final_encoder": {
+                "trainable": 1,
+                "layers": ["encoder.2"],
+            },
+            "classifier": {
+                "trainable": 1,
+                "layers": ["classifier"],
+            },
+        },
+    }
+
+    names = transfer.apply_req_grid(model, req_grid)
+
+    assert names == [
+        "encoder.2.weight",
+        "encoder.2.bias",
+        "classifier.weight",
+        "classifier.bias",
+    ]
+
+
+def test_apply_req_grid_full_finetune():
+    model = DummyModel()
+    req_grid = {
+        "full_finetune": 1,
+        "strict": 1,
+        "groups": {},
+    }
+
+    names = transfer.apply_req_grid(model, req_grid)
+
+    assert names == [
+        name for name, _ in model.named_parameters()
+    ]
+    assert all(parameter.requires_grad for parameter in model.parameters())
+
+
+def test_apply_req_grid_strict_rejects_missing_layer():
+    model = DummyModel()
+    req_grid = {
+        "full_finetune": 0,
+        "strict": 1,
+        "groups": {
+            "missing": {
+                "trainable": 1,
+                "layers": ["unknown.layer"],
+            },
+        },
+    }
+
+    with pytest.raises(RuntimeError, match="missing_layers"):
+        transfer.apply_req_grid(model, req_grid)
+
+
+def test_configure_partial_uses_req_grid(monkeypatch):
+    model = DummyModel()
+    req_grid = {
+        "full_finetune": 0,
+        "strict": 1,
+        "groups": {
+            "final_encoder": {
+                "trainable": 1,
+                "layers": ["encoder.2"],
+            },
+            "classifier": {
+                "trainable": 1,
+                "layers": ["classifier"],
+            },
+        },
+    }
+
+    monkeypatch.setattr(
+        transfer,
+        "load_req_grid",
+        lambda mil: req_grid,
+    )
+
+    modules = transfer.configure_partial(
+        model,
+        num_classes=2,
+        mil="dummy",
+    )
     names = transfer.get_trainable_parameter_names(model)
 
-    assert "classifier" in trainable_modules
-    assert "classifier.weight" in names
-    assert "classifier.bias" in names
-    assert len(names) >= 2
+    assert modules == ["classifier", "encoder.2"]
+    assert names == [
+        "encoder.2.weight",
+        "encoder.2.bias",
+        "classifier.weight",
+        "classifier.bias",
+    ]
 
 
-def test_config_loading():
-    config = {"example_model": {"head": ["classifier"], "partial": ["encoder"]}}
+@pytest.mark.parametrize(
+    "mil",
+    [
+        "abmil",
+        "clam",
+        "dftd",
+        "dsmil",
+        "ilra",
+        "rrt",
+        "transformer",
+        "transmil",
+        "wikg",
+    ],
+)
+def test_architecture_req_grid_can_be_loaded(mil):
+    req_grid = transfer.load_req_grid(mil)
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", encoding="utf-8", delete=False) as file:
-        json.dump(config, file)
-        config_path = file.name
-
-    try:
-        loaded = transfer.load_transfer_layers_config(config_path)
-        assert loaded == config
-    finally:
-        Path(config_path).unlink(missing_ok=True)
-
-
-if __name__ == "__main__":
-    test_freeze_and_unfreeze()
-    test_parameter_counts_and_patterns()
-    test_pattern_validation()
-    test_find_classification_heads()
-    test_configure_head_only()
-    test_configure_partial()
-    test_config_loading()
-    print("OK: todas las utilidades de transferencia funcionan correctamente")
+    assert isinstance(req_grid, dict)
+    assert "full_finetune" in req_grid
+    assert "strict" in req_grid
+    assert isinstance(req_grid["groups"], dict)
+    assert req_grid["groups"]

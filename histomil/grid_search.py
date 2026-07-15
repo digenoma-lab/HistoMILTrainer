@@ -1,12 +1,12 @@
 """Grid search for MIL models with cross-validation."""
 import json
 import os
+from itertools import product
 
 import pandas as pd
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
-from sklearn.model_selection import ParameterGrid
 import logging
 import shutil
 from histomil import (
@@ -27,26 +27,24 @@ class GridSearch:
     SEED = 2
     BATCH_SIZE = 16
 
-    def __init__(self, folds, features_path, splits_dir, csv_path, results_dir, feature_extractor="uni_v2",
-                 epochs=10, learning_rate=4e-4, mil="abmil", use_class_weights=True,
-                 *, grid_params_path=None, transfer_mode="scratch", pretrained_checkpoint=None, partial_unfreeze_modules=6,):
+    def __init__(self, folds, features_path, splits_dir, csv_path, results_dir,
+                 feature_extractor="uni_v2", epochs=10, learning_rate=4e-4,
+                 mil="abmil", use_class_weights=True, grid_params_path="configs/abmil.json"):
         """
-        Initialize transfer training.
+        Initialize GridSearch.
 
         Args:
-            folds: Number of folds
-            features_path: Path to H5 feature files
+            folds: Number of cross-validation folds
+            features_path: Path to H5 feature files directory
             splits_dir: Directory containing split files
             csv_path: Path to dataset CSV
-            results_dir: Output directory
-            feature_extractor: Feature extractor name
-            epochs: Number of training epochs
-            learning_rate: Learning rate
-            mil: MIL architecture name
-            use_class_weights: Whether to use class weights
-            grid_params_path: JSON with fixed pretrained model parameters
-            transfer_mode: Transfer strategy: scratch, head_only, partial
-            pretrained_checkpoint: Source checkpoint required for head_only, partial
+            results_dir: Output directory for results
+            feature_extractor: Feature extractor name (default: "uni_v2")
+            epochs: Number of training epochs (default: 10)
+            learning_rate: Learning rate (default: 4e-4)
+            mil: MIL architecture name (default: "abmil")
+            use_class_weights: Whether to use class weights (default: True)
+            grid_params_path: Path to JSON file with grid search parameters
         """
         self.folds = folds
         self.features_path = os.path.realpath(features_path)
@@ -58,51 +56,41 @@ class GridSearch:
         self.learning_rate = learning_rate
         self.mil = mil
         self.use_class_weights = use_class_weights
-        self.batch_size = 1 if self.mil == "clam" else getattr(self, "BATCH_SIZE", 16)
-        self.transfer_mode = transfer_mode
-        self.pretrained_checkpoint = os.path.realpath(pretrained_checkpoint) if pretrained_checkpoint not in [None, ""] else None
-        self.partial_unfreeze_modules = partial_unfreeze_modules
+        self.batch_size = 1 if mil == "clam" else self.BATCH_SIZE
+
         self.logger = logging.getLogger(__name__)
 
-        allowed_modes = ["scratch", "head_only", "partial"]
-        if self.transfer_mode not in allowed_modes:
-            raise ValueError(f"transfer_mode debe ser uno de {allowed_modes}. Se recibió: {self.transfer_mode}")
-        if self.transfer_mode == "scratch" and self.pretrained_checkpoint is not None:
-            raise ValueError("scratch no debe recibir pretrained_checkpoint")
-        if self.transfer_mode in ["head_only", "partial"] and self.pretrained_checkpoint is None:
-            raise ValueError(f"{self.transfer_mode} requiere pretrained_checkpoint")
+        self.logger.info(f"Initializing GridSearch with parameters:")
+        self.logger.info(f"  - Folds: {folds}")
+        self.logger.info(f"  - Features path: {self.features_path}")
+        self.logger.info(f"  - Splits directory: {self.splits_dir}")
+        self.logger.info(f"  - CSV path: {self.csv_path}")
+        self.logger.info(f"  - Results directory: {self.results_dir}")
+        self.logger.info(f"  - Feature extractor: {feature_extractor}")
+        self.logger.info(f"  - Epochs: {epochs}")
+        self.logger.info(f"  - Learning rate: {learning_rate}")
+        self.logger.info(f"  - MIL model: {mil}")
+        self.logger.info(f"  - Use class weights: {use_class_weights}")
+        self.logger.info(f"  - Batch size: {self.batch_size}")
+        self.logger.info(f"  - Device: {device}")
 
-        if grid_params_path in [None, ""]:
-            if self.transfer_mode == "scratch":
-                self.grid_params_path = os.path.realpath(os.path.join(os.path.dirname(__file__), "configs", f"{self.mil}.json"))
-            else:
-                raise ValueError("head_only y partial requieren --grid_params compatible con el checkpoint")
-        else:
-            self.grid_params_path = os.path.realpath(grid_params_path)
+        # Load grid parameters
+        self.logger.info(f"Loading grid search parameters from: {grid_params_path}")
+        with open(grid_params_path, "r") as f:
+            grid_params = json.load(f)
+        self.logger.debug(f"Grid parameters: {grid_params}")
 
-        with open(self.grid_params_path, "r") as file:
-            model_params = json.load(file)
+        self.param_combinations = [
+            dict(zip(grid_params.keys(), combo))
+            for combo in product(*grid_params.values())
+        ]
+        self.logger.info(f"Generated {len(self.param_combinations)} parameter combinations")
 
-        if not isinstance(model_params, dict) or not model_params:
-            raise ValueError(
-                "grid_params_path debe contener un objeto JSON no vacío."
-            )
-
-        if self.pretrained_checkpoint is not None and not os.path.isfile(self.pretrained_checkpoint):
-            raise FileNotFoundError(f"No existe pretrained_checkpoint: {self.pretrained_checkpoint}")
-        
-        self.model_params = model_params
-
-        if any(isinstance(v, list) for v in self.model_params.values()):
-            self.param_combinations = list(ParameterGrid(self.model_params))
-        else:
-            self.param_combinations = [self.model_params]
-
-        self.logger.info(
-            f"Selected model parameters: {self.model_params}"
-        )
-
+        # Set seed
+        self.logger.debug(f"Setting random seed to: {self.SEED}")
         seed_torch(self.SEED)
+
+        self.logger.info(f"Creating results directory: {self.results_dir}")
         os.makedirs(self.results_dir, exist_ok=True)
 
     def _convert_value(self, v):
@@ -195,7 +183,7 @@ class GridSearch:
                 self.logger.info(f"Processing fold {fold}/{self.folds-1} for current parameters")
                 dataset_csv, class_weights = self._load_fold_data(fold)
                 train_loader = self._create_loader(dataset_csv, "train", shuffle=True)
-                val_loader = self._create_loader(dataset_csv, "val", shuffle=False)
+                val_loader = self._create_loader(dataset_csv, "val", shuffle=True)
 
                 self.logger.debug(f"Importing {self.mil} model with parameters: {params}")
                 mil = import_model(
@@ -204,19 +192,16 @@ class GridSearch:
 
                 self.logger.info(f"Training model for fold {fold}")
                 _, train_metrics, checkpoint = train(
-                    model=mil,
-                    train_loader=train_loader,
-                    val_loader=val_loader,
-                    results_dir=self.results_dir,
-                    learning_rate=self.learning_rate,
-                    fold=fold,
-                    epochs=self.epochs,
+                    mil,
+                    train_loader,
+                    val_loader,
+                    self.results_dir,
+                    self.learning_rate,
+                    fold,
+                    self.epochs,
                     class_weights=class_weights,
                     model_name=self.mil,
                     params=params,
-                    transfer_mode=self.transfer_mode,
-                    pretrained_checkpoint=self.pretrained_checkpoint,
-                    partial_unfreeze_modules=self.partial_unfreeze_modules,
                 )
 
                 self.logger.info(f"✓ Training completed for fold {fold}")
@@ -275,7 +260,7 @@ class GridSearch:
             mil = import_model(
                 self.mil, self.feature_extractor, **clean_params
             ).to(device)
-            mil.load_state_dict(torch.load(row["model_checkpoint"], map_location=device))
+            mil.load_state_dict(torch.load(row["model_checkpoint"]))
 
             self.logger.info(f"Evaluating model on test set")
             test_metrics, y_preds, y_true = test(
@@ -314,9 +299,10 @@ class GridSearch:
         json.dump(clean_params, open(best_params_file, "w"))
 
         self.logger.info(f"Copying best models to: {self.results_dir}/[fold]-best_model.pt")
-        for _, row in best_folds.iterrows():
-            fold_idx = int(row["fold"])
-            shutil.copy(row["model_checkpoint"], f"{self.results_dir}/{fold_idx}_best_model.pt")
+        best_model_file = "_".join( [a + "=" + str(clean_params[a]) for a in clean_params.keys()] ) + "-checkpoint.pt"
+        for fold in range(self.folds):
+            fold_model_file = f"{self.results_dir}/{fold}-{best_model_file}"
+            shutil.copy(fold_model_file, f"{self.results_dir}/{fold}_best_model.pt")
 
         self.logger.info("=" * 60)
         self.logger.info("✓ Grid search completed successfully")

@@ -1,5 +1,5 @@
 {
-  "_comment": "Partial fijo por arquitectura MIL. 50.34% del núcleo común queda entrenable; model.patch_embed permanece congelado. La configuración es independiente del feature extractor.",
+  "_comment": "Configuración partial para DFTD. Uso: full_finetune=1 descongela todos los parámetros e ignora groups; full_finetune=0 congela el modelo y aplica únicamente los grupos definidos. En groups, trainable=1 descongela las capas indicadas y trainable=0 las mantiene congeladas. layers contiene nombres o prefijos de módulos PyTorch. strict=1 genera un error cuando una capa no existe; strict=0 omite capas no encontradas. Modifique groups y layers para personalizar el fine-tuning. La configuración depende de la arquitectura MIL y es independiente del feature extractor.",
   "full_finetune": 0,
   "strict": 1,
   "groups": {

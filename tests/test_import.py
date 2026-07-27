@@ -16,6 +16,7 @@ def test_import_histomil():
     assert hasattr(histomil, "test")
     assert hasattr(histomil, "EarlyStopping")
     assert hasattr(histomil, "import_model")
+    assert hasattr(histomil, "FixedParameterTrainer")
     assert hasattr(histomil, "Predictor")
     assert hasattr(histomil, "HeatmapVisualizer")
 

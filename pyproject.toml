@@ -18,7 +18,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Medical Science Apps.",
 ]
 packages = [{include = "histomil"}]
-include = ["histomil/configs/*.json"]
+include = ["histomil/configs/*.json", "histomil/configs/req_grid/*.json",]
 
 # Note: All runtime dependencies (torch, numpy, pandas, scikit-learn, tqdm, h5py, etc.)
 # are provided by MIL-Lab, which must be installed first (See README.md)
@@ -40,9 +40,8 @@ mypy = "^0.991"
 
 # Scripts can be added here if CLI commands are created in the future
 [tool.poetry.scripts]
-# histomil-train = "histomil.cli:train"
-# histomil-splits = "histomil.cli:splits"
 histomil-splits = "histomil.cli:make_splits"
+histomil-train = "histomil.cli:train_model"
 histomil-grid = "histomil.cli:grid_search"
 histomil-predict = "histomil.cli:predict"
 histomil-heatmap = "histomil.cli:heatmap"
@@ -71,4 +70,3 @@ filterwarnings = [
     "ignore::FutureWarning:timm.*",
     "ignore::DeprecationWarning:torch_geometric.*",
 ]
-

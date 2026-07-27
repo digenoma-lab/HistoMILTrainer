@@ -1,0 +1,21 @@
+Configuración: partial fine-tuning fijo por arquitectura MIL
+Objetivo: entre 40% y 60% del núcleo MIL entrenable
+Referencia central: 50%
+full_finetune: 0
+
+Resultados:
+abmil:       núcleo=50.08% virchow2=50.08% uni_v2=50.08% [OK]
+dsmil:       núcleo=43.92% virchow2=43.92% uni_v2=43.92% [OK]
+dftd:        núcleo=50.34% virchow2=50.34% uni_v2=50.34% [OK]
+ilra:        núcleo=48.18% virchow2=48.18% uni_v2=48.18% [OK]
+rrt:         núcleo=49.62% virchow2=49.62% uni_v2=49.62% [OK]
+transformer: núcleo=50.00% virchow2=50.00% uni_v2=50.00% [OK]
+transmil:    núcleo=49.93% virchow2=49.93% uni_v2=49.93% [OK]
+wikg:        núcleo=50.00% virchow2=50.00% uni_v2=50.00% [OK]
+clam:        núcleo=50.34% virchow2=50.34% uni_v2=50.34% [OK]
+
+Definición experimental:
+scratch: entrenamiento completo desde inicialización aleatoria
+head_only: únicamente cabezales de clasificación
+partial: 40%-60% del núcleo MIL desde checkpoint
+partial full: entrenamiento completo desde checkpoint

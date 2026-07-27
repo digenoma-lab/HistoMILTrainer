@@ -1,0 +1,29 @@
+{
+  "_comment": "Configuración partial para RRT. Uso: full_finetune=1 descongela todos los parámetros e ignora groups; full_finetune=0 congela el modelo y aplica únicamente los grupos definidos. En groups, trainable=1 descongela las capas indicadas y trainable=0 las mantiene congeladas. layers contiene nombres o prefijos de módulos PyTorch. strict=1 genera un error cuando una capa no existe; strict=0 omite capas no encontradas. Modifique groups y layers para personalizar el fine-tuning. La configuración depende de la arquitectura MIL y es independiente del feature extractor.",
+  "full_finetune": 1,
+  "strict": 1,
+  "groups": {
+    "classifier": {
+      "trainable": 1,
+      "layers": [
+        "model.classifier"
+      ]
+    },
+    "context_encoder": {
+      "trainable": 1,
+      "layers": [
+        "model.encoder.layer1.attn.res_conv",
+        "model.encoder.layer1.attn.to_out.0",
+        "model.encoder.layer1.attn.to_qkv",
+        "model.encoder.layer1.norm",
+        "model.encoder.layers.0.attn.res_conv",
+        "model.encoder.layers.0.norm",
+        "model.encoder.norm",
+        "model.encoder.pool_fn.attention.attention.2",
+        "model.encoder.pos_embedding.proj",
+        "model.encoder.pos_embedding.proj1",
+        "model.encoder.pos_embedding.proj2"
+      ]
+    }
+  }
+}

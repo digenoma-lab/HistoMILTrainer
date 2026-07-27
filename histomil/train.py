@@ -7,16 +7,66 @@ import numpy as np
 from tqdm import tqdm
 import os
 import logging
+from pathlib import Path
+from histomil.transfer import (configure_head_only, configure_partial, count_parameters, get_trainable_parameter_names, get_trainable_parameters, unfreeze_all_parameters,)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+def load_pretrained_checkpoint(model, checkpoint_path):
+    """Carga un checkpoint fuente sobre un modelo ya construido."""
+    checkpoint_path = Path(checkpoint_path)
+
+    if not checkpoint_path.is_file():
+        raise FileNotFoundError(
+            f"No existe el checkpoint preentrenado: {checkpoint_path}"
+        )
+
+    device = next(model.parameters()).device
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+
+    if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+        state_dict = checkpoint["model_state_dict"]
+    elif isinstance(checkpoint, dict) and "state_dict" in checkpoint:
+        state_dict = checkpoint["state_dict"]
+    else:
+        state_dict = checkpoint
+
+    if not isinstance(state_dict, dict):
+        raise TypeError(
+            f"Formato de checkpoint no válido: {type(state_dict).__name__}"
+        )
+
+    state_dict = {k.replace("module.", "", 1): v for k, v in state_dict.items()}
+
+    model_state = model.state_dict()
+    compatible_state = {
+        k: v for k, v in state_dict.items()
+        if k in model_state and model_state[k].shape == v.shape
+    }
+    skipped = {
+        k: tuple(v.shape) for k, v in state_dict.items()
+        if k not in model_state or model_state[k].shape != v.shape
+    }
+    model_state.update(compatible_state)
+    model.load_state_dict(model_state, strict=True)
+    logging.getLogger(__name__).info(
+        "Loaded compatible checkpoint tensors: %d | skipped: %d",
+        len(compatible_state),
+        len(skipped),
+    )
+
+    return checkpoint_path
+
+
 def train(model, train_loader, val_loader, results_dir, learning_rate, fold, epochs, patience = 2,
-    stop_epoch = 2, class_weights = None, model_name = None, params = None):
+    stop_epoch = 2, class_weights = None, model_name = None, params = None, *, transfer_mode="scratch",
+    pretrained_checkpoint=None, partial_unfreeze_modules=2,
+):
     """
     Train function
     """
     logger = logging.getLogger(__name__)
-    
+
     logger.info("=" * 60)
     logger.info(f"Starting training for fold {fold}")
     logger.info("=" * 60)
@@ -29,7 +79,7 @@ def train(model, train_loader, val_loader, results_dir, learning_rate, fold, epo
     logger.info(f"  - Device: {device}")
     logger.info(f"  - Train batches: {len(train_loader)}")
     logger.info(f"  - Val batches: {len(val_loader)}")
-    
+
     if class_weights is not None:
         weights_tensor = torch.tensor(class_weights, dtype=torch.float).to(device)
         criterion = nn.CrossEntropyLoss(weight = weights_tensor)
@@ -37,10 +87,66 @@ def train(model, train_loader, val_loader, results_dir, learning_rate, fold, epo
     else:
         criterion = nn.CrossEntropyLoss()
         logger.info("Using standard CrossEntropyLoss")
-    
-    optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
-    logger.debug(f"Optimizer: AdamW with lr={learning_rate}")
-    
+
+    if transfer_mode == "scratch":
+        if pretrained_checkpoint is not None:
+            raise ValueError("scratch no debe recibir pretrained_checkpoint")
+
+        unfreeze_all_parameters(model)
+        logger.info("Modelo inicializado desde cero; todos los parámetros entrenables.")
+
+    elif transfer_mode == "head_only":
+        if pretrained_checkpoint is None:
+            raise ValueError("head_only requiere pretrained_checkpoint")
+
+        loaded_checkpoint = load_pretrained_checkpoint(
+            model=model,
+            checkpoint_path=pretrained_checkpoint,
+        )
+        trainable_modules = configure_head_only(model=model, num_classes=2)
+
+        logger.info("Checkpoint cargado: %s", loaded_checkpoint)
+        logger.info("Cabezas clasificadoras entrenables: %s", trainable_modules)
+
+    elif transfer_mode == "partial":
+        if pretrained_checkpoint is None:
+            raise ValueError("partial requiere pretrained_checkpoint")
+
+        loaded_checkpoint = load_pretrained_checkpoint(
+            model=model,
+            checkpoint_path=pretrained_checkpoint,
+        )
+        trainable_modules = configure_partial(
+            model=model,
+            num_classes=2,
+            unfreeze_modules=partial_unfreeze_modules,
+            mil=model_name,
+        )
+
+        logger.info("Checkpoint cargado: %s", loaded_checkpoint)
+        logger.info("Módulos entrenables en partial: %s", trainable_modules)
+
+    else:
+        raise ValueError(
+            "transfer_mode debe ser 'scratch', 'head_only' o 'partial'. "
+            f"Se recibió: {transfer_mode}"
+        )
+    parameter_counts = count_parameters(model)
+    trainable_names = get_trainable_parameter_names(model)
+    trainable_parameters = get_trainable_parameters(model)
+
+    logger.info(
+        "Parameters | total=%d | trainable=%d | frozen=%d",
+        parameter_counts["total"],
+        parameter_counts["trainable"],
+        parameter_counts["frozen"],
+    )
+    logger.info("Trainable parameter tensors: %s", trainable_names)
+    if len(trainable_parameters) == 0:
+        raise RuntimeError(f"No trainable parameters found for transfer_mode={transfer_mode}")
+    optimizer = optim.AdamW(trainable_parameters, lr=learning_rate)
+    logger.debug("Optimizer: AdamW with lr=%s", learning_rate)
+
     early_stopping = EarlyStopping(patience=patience, stop_epoch=stop_epoch, verbose=True)
     logger.info("Start training")
 
@@ -75,37 +181,37 @@ def train(model, train_loader, val_loader, results_dir, learning_rate, fold, epo
             # Variable patches mode: process each slide individually
             optimizer.zero_grad()
             batch_loss = 0.
-            
+
             # Process each slide and accumulate gradients
             for features, label in batch:
                 features = features.to(device)  # Shape: (num_patches, feature_dim)
                 label = label.to(device).long().unsqueeze(0)  # Shape: (1,)
-                
+
                 # Add batch dimension: (1, num_patches, feature_dim)
                 features = features.unsqueeze(0)
-                
+
                 # Forward pass
                 if model_name in ["clam", "dftd"]:
                     logits, attn = model(features, label, criterion)  # Shape: (1, 2)
                 else:
                     logits, attn = model(features)
                 loss = criterion(logits["logits"], label)
-                
+
                 # Scale loss by batch size for proper averaging
                 loss = loss / len(batch)
                 batch_loss += loss.item() * len(batch)  # Store unscaled for reporting
-                
+
                 # Backward pass (accumulates gradients)
                 loss.backward()
-                
+
                 # Collect predictions
                 probs = torch.softmax(logits["logits"], dim=1)
                 train_preds.append(probs[0, 1].detach().cpu().item())
                 train_labels.append(label[0].detach().cpu().item())
-            
+
             # Update weights once after processing all slides in batch
             optimizer.step()
-            
+
             # Average loss across slides in batch
             total_loss = batch_loss / len(batch)
             train_loss += total_loss
@@ -129,24 +235,24 @@ def train(model, train_loader, val_loader, results_dir, learning_rate, fold, epo
                 for features, label in batch:
                     features = features.to(device)  # Shape: (num_patches, feature_dim)
                     label = label.to(device).long().unsqueeze(0)  # Shape: (1,)
-                    
+
                     # Add batch dimension: (1, num_patches, feature_dim)
                     features = features.unsqueeze(0)
-                    
+
                     # Forward pass
                     if model_name in ["clam", "dftd"]:
                         logits, attn = model(features, label, criterion)  # Shape: (1, 2)
                     else:
                         logits, attn = model(features)
                     loss = criterion(logits["logits"], label)
-                    
+
                     batch_loss += loss.item()
-                    
+
                     # Collect predictions
                     probs = torch.softmax(logits["logits"], dim=1)
                     val_preds.append(probs[0, 1].cpu().item())
                     val_labels.append(label[0].cpu().item())
-                
+
                 # Average loss across slides in batch
                 total_loss = batch_loss / len(batch)
                 val_loss += total_loss
@@ -179,7 +285,7 @@ def train(model, train_loader, val_loader, results_dir, learning_rate, fold, epo
             break
 
     logger.info(f"Loading best model from checkpoint: {output_name}")
-    model.load_state_dict(torch.load(output_name))
+    model.load_state_dict(torch.load(output_name, map_location=device))
     logger.info("=" * 60)
     logger.info(f"✓ Training completed for fold {fold}")
     logger.info(f"Best epoch: {best_metrics['epoch']}, Best val AUC: {best_metrics['val_auc']:.4f}")
@@ -189,12 +295,12 @@ def train(model, train_loader, val_loader, results_dir, learning_rate, fold, epo
 def test(model, test_loader, class_weights = None, model_name = None):
     """Test function: Evaluates clam model with optimal threshold selection by F1 macro."""
     logger = logging.getLogger(__name__)
-    
+
     logger.info("=" * 60)
     logger.info("Starting model evaluation on test set")
     logger.info("=" * 60)
     logger.info(f"Test batches: {len(test_loader)}")
-    
+
     if class_weights is not None:
         weights_tensor = torch.tensor(class_weights, dtype=torch.float).to(device)
         criterion = nn.CrossEntropyLoss(weight = weights_tensor)
@@ -202,7 +308,7 @@ def test(model, test_loader, class_weights = None, model_name = None):
     else:
         criterion = nn.CrossEntropyLoss()
         logger.info("Using standard CrossEntropyLoss")
-    
+
     model.eval()
     all_labels, all_outputs = [], []
     correct = 0
@@ -216,10 +322,10 @@ def test(model, test_loader, class_weights = None, model_name = None):
             for features, label in batch:
                 features = features.to(device)  # Shape: (num_patches, feature_dim)
                 label = label.to(device).long().unsqueeze(0)  # Shape: (1,)
-                
+
                 # Add batch dimension: (1, num_patches, feature_dim)
                 features = features.unsqueeze(0)
-                
+
                 # Forward pass
                 if model_name in ["clam", "dftd"]:
                     logits, attn = model(features, label, criterion)  # Shape: (1, 2)
@@ -227,10 +333,10 @@ def test(model, test_loader, class_weights = None, model_name = None):
                     logits, attn = model(features)
                 probs = torch.softmax(logits["logits"], dim=1)
                 predicted = torch.argmax(probs, dim=1)  # predicted: [1]
-                
+
                 correct += (predicted == label).sum().item()
                 total += label.size(0)
-                
+
                 all_outputs.append(probs[0, 1].cpu().item())  # prob. clase 1
                 all_labels.append(label[0].cpu().item())
 
@@ -238,13 +344,13 @@ def test(model, test_loader, class_weights = None, model_name = None):
     # List contains scalars (variable patches mode)
     all_outputs = np.array(all_outputs)
     all_labels = np.array(all_labels)
-    
+
     logger.info(f"Computing metrics on {len(all_labels)} test samples")
     auc = roc_auc_score(all_labels, all_outputs)
     pred_labels = (all_outputs >= 0.5).astype(int)
     accuracy = accuracy_score(all_labels, pred_labels)
     f1_macro = f1_score(all_labels, pred_labels, average='macro')
-    
+
     logger.info(f"Test accuracy: {correct}/{total} = {correct/total:.4f}")
 
     metrics = {
@@ -252,10 +358,10 @@ def test(model, test_loader, class_weights = None, model_name = None):
         "test_acc": accuracy,
         "f1_macro": f1_macro
     }
-    
+
     logger.info("=" * 60)
     logger.info("✓ Test evaluation completed")
     logger.info(f"Test metrics: AUC={auc:.4f}, Acc={accuracy:.4f}, F1={f1_macro:.4f}")
     logger.info("=" * 60)
-    
+
     return metrics, all_outputs, all_labels

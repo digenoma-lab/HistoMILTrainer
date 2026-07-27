@@ -1,0 +1,32 @@
+{
+  "_comment": "Configuración partial para TRANSFORMER. Uso: full_finetune=1 descongela todos los parámetros e ignora groups; full_finetune=0 congela el modelo y aplica únicamente los grupos definidos. En groups, trainable=1 descongela las capas indicadas y trainable=0 las mantiene congeladas. layers contiene nombres o prefijos de módulos PyTorch. strict=1 genera un error cuando una capa no existe; strict=0 omite capas no encontradas. Modifique groups y layers para personalizar el fine-tuning. La configuración depende de la arquitectura MIL y es independiente del feature extractor.",
+  "full_finetune": 1,
+  "strict": 1,
+  "groups": {
+    "classifier": {
+      "trainable": 1,
+      "layers": [
+        "model.classifier"
+      ]
+    },
+    "normalization": {
+      "trainable": 0,
+      "layers": []
+    },
+    "input_projection": {
+      "trainable": 0,
+      "layers": []
+    },
+    "context_blocks": {
+      "trainable": 1,
+      "layers": [
+        "model.blocks.0.attention.out_proj",
+        "model.blocks.0.mlp.0",
+        "model.blocks.0.mlp.3",
+        "model.blocks.0.norm",
+        "model.blocks.0.norm2"
+      ],
+      "blocks": []
+    }
+  }
+}

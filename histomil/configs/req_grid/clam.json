@@ -1,0 +1,26 @@
+{
+  "_comment": "Configuración partial para CLAM. Uso: full_finetune=1 descongela todos los parámetros e ignora groups; full_finetune=0 congela el modelo y aplica únicamente los grupos definidos. En groups, trainable=1 descongela las capas indicadas y trainable=0 las mantiene congeladas. layers contiene nombres o prefijos de módulos PyTorch. strict=1 genera un error cuando una capa no existe; strict=0 omite capas no encontradas. Modifique groups y layers para personalizar el fine-tuning. La configuración depende de la arquitectura MIL y es independiente del feature extractor.",
+  "full_finetune": 1,
+  "strict": 1,
+  "groups": {
+    "classifier": {
+      "trainable": 1,
+      "layers": [
+        "model.classifier"
+      ]
+    },
+    "aggregator": {
+      "trainable": 1,
+      "layers": [
+        "model.global_attn.attention_a.0"
+      ]
+    },
+    "instance_classifier": {
+      "trainable": 1,
+      "layers": [
+        "model.instance_classifiers.0",
+        "model.instance_classifiers.1"
+      ]
+    }
+  }
+}

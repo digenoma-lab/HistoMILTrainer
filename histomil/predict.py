@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import h5py
 import torch
+import torch.nn.functional as F
 import numpy as np
 from tqdm import tqdm
 import pandas as pd
@@ -19,10 +20,100 @@ from histomil import (
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+
+def _unwrap_transformer(model):
+    """Return the underlying Transformer MIL module (handles HF PreTrained wrapper)."""
+    if hasattr(model, "model") and hasattr(model.model, "blocks"):
+        return model.model
+    return model
+
+
+def _mha_cls_attention_row(mha: torch.nn.MultiheadAttention, x: torch.Tensor) -> torch.Tensor:
+    """
+    Softmax attention from the CLS token (index 0) to all tokens, averaged over heads.
+
+    This is equivalent to the CLS row of ``need_weights=True`` / ``average_attn_weights=True``
+    in ``nn.MultiheadAttention``, but uses O(L) memory instead of O(L^2).
+
+    Args:
+        mha: Multi-head attention module (``batch_first=False``).
+        x: Normalized tokens of shape ``(L, B, E)``.
+
+    Returns:
+        Attention row of shape ``(B, L)``.
+    """
+    seq_len, batch_size, embed_dim = x.shape
+    num_heads = mha.num_heads
+    head_dim = embed_dim // num_heads
+    if head_dim * num_heads != embed_dim:
+        raise ValueError(
+            f"embed_dim={embed_dim} is not divisible by num_heads={num_heads}"
+        )
+
+    if mha.in_proj_weight is None:
+        q = F.linear(
+            x[:1],
+            mha.q_proj_weight,
+            None if mha.in_proj_bias is None else mha.in_proj_bias[:embed_dim],
+        )
+        k = F.linear(
+            x,
+            mha.k_proj_weight,
+            None if mha.in_proj_bias is None else mha.in_proj_bias[embed_dim: 2 * embed_dim],
+        )
+    else:
+        w_q, w_k, _ = mha.in_proj_weight.chunk(3, dim=0)
+        if mha.in_proj_bias is None:
+            b_q = b_k = None
+        else:
+            b_q, b_k, _ = mha.in_proj_bias.chunk(3, dim=0)
+        q = F.linear(x[:1], w_q, b_q)  # (1, B, E)
+        k = F.linear(x, w_k, b_k)      # (L, B, E)
+
+    # (B, H, Lq/Lk, D)
+    q = q.view(1, batch_size, num_heads, head_dim).permute(1, 2, 0, 3)
+    k = k.view(seq_len, batch_size, num_heads, head_dim).permute(1, 2, 0, 3)
+
+    attn = torch.matmul(q, k.transpose(-2, -1)) * (head_dim ** -0.5)  # (B, H, 1, L)
+    attn = attn.softmax(dim=-1)
+    return attn.mean(dim=1).squeeze(1)  # (B, L)
+
+
+def transformer_cls_attention(model, features: torch.Tensor) -> np.ndarray:
+    """
+    Extract CLS→patch attention for the first Transformer block without an N×N matrix.
+
+    Matches the scores previously taken as ``attention[0, 1:]`` after
+    ``return_attention=True``.
+    """
+    mil = _unwrap_transformer(model)
+    block = mil.blocks[0]
+
+    h = features
+    if h.dim() == 2:
+        h = h.unsqueeze(0)
+    h = mil.patch_embed(h)
+    batch_size = h.shape[0]
+    cls_tokens = mil.cls_token.expand(batch_size, -1, -1).to(h.device)
+    h = torch.cat((cls_tokens, h), dim=1)  # (B, N+1, E)
+
+    # Mirror TransLayer preprocessing: (N+1, 1, E) with batch_first=False
+    if h.shape[0] == 1:
+        x = h.squeeze(0).unsqueeze(1)
+    else:
+        x = h.transpose(0, 1)
+    norm_x = block.norm(x)
+    attn_row = _mha_cls_attention_row(block.attention, norm_x)  # (B, N+1)
+    # Same crop as before: drop CLS self-attention entry
+    return attn_row[0, 1:].detach().cpu().numpy()
+
+
 class Predictor:
     SEED = 2
-    BATCH_SIZE = 16
-    
+    # Variable-length bags are processed one slide at a time; keep loader batch=1
+    # so large WSIs are not held concurrently in memory.
+    BATCH_SIZE = 1
+
     def __init__(self, csv_path, weights_path, features_folder, feature_extractor, results_dir, mil, params_path):
         self.logger = logging.getLogger(__name__)
         self.csv_path = csv_path
@@ -69,51 +160,71 @@ class Predictor:
         filename = Path(filepath)
         return filename.stem
 
+    def _forward_with_attention(self, model, features):
+        """Run model forward and return (logits_dict, attn_scores ndarray)."""
+        if self.mil == "transformer":
+            # Logits without materializing N×N attention (uses SDPA / flash path).
+            logits, _ = model(features, return_attention=False)
+            attn_scores = transformer_cls_attention(model, features)
+            return logits, attn_scores
+
+        if self.mil in ["clam", "dftd"]:
+            logits, attn = model(
+                features,
+                torch.tensor([1]).to(device),
+                CrossEntropyLoss().to(device),
+                return_attention=True,
+            )
+        else:
+            logits, attn = model(features, return_attention=True)
+
+        attn_scores = attn["attention"].squeeze().cpu().numpy()
+        if self.mil == "wikg":
+            # Geo attention score: average over the patch dimension
+            attn_scores = attn_scores.mean(axis=0)
+        if self.mil == "dsmil":
+            # Only keep the attention score for the second class (positive)
+            attn_scores = attn_scores[:, 1]
+        if self.mil == "transmil":
+            # Transmil returns a N^2 length array of attention scores.
+            # We need to crop it to the number of patches.
+            attn_scores = attn_scores[: features.shape[1]]
+        return logits, attn_scores
+
     def predict(self, model, test_loader):
         """Predict function: Predicts the class of a set of slides."""
         self.logger.info("Starting prediction process")
+        if self.mil == "transformer":
+            self.logger.info(
+                "Transformer: extracting CLS attention in O(N) memory "
+                "(avoids full N×N attention matrices on large WSIs)"
+            )
         model.eval()
         all_outputs = []
         all_attentions = []
         total_slides = 0
         with torch.no_grad():
             for batch in tqdm(test_loader, desc="Predicting"):
-                # Handle variable patches: batch is a list of (features, label) tuples
-                # Variable patches mode: process each slide individually
+                # Handle variable patches: batch is a list of feature tensors
                 for features in batch:
                     features = features.to(device)  # Shape: (num_patches, feature_dim)
                     # Add batch dimension: (1, num_patches, feature_dim)
                     features = features.unsqueeze(0)
                     num_patches = features.shape[1]
                     self.logger.debug(f"Processing slide with {num_patches} patches")
-                    
-                    if self.mil in ["clam", "dftd"]:
-                        logits, attn = model(features, 
-                                          torch.tensor([1]).to(device),
-                                          CrossEntropyLoss().to(device),
-                                          return_attention=True)
-                    else:
-                        logits, attn = model(features, return_attention=True)
-                    attn_scores = attn["attention"].squeeze().cpu().numpy()
-                    if self.mil == "wikg":
-                        #It's a geo attention score, must be averaged over the patches
-                        attn_scores = attn_scores.mean(axis = 0)
-                    if self.mil == "dsmil":
-                        # Only keep the attention score for the second class (positive)
-                        attn_scores = attn_scores[:, 1]
-                    if self.mil == "transmil":
-                        # Transmil returns a N^2 length array of attention scores.
-                        # We need to crop it to the number of patches.
-                        attn_scores = attn_scores[:features.shape[1]]
-                    if self.mil == "transformer":
-                        # We use cls token (row) as the attention score
-                        attn_scores = attn_scores[0, 1:]
-                    print("attn_scores.shape", attn_scores.shape)
-                    print("features.shape", features.shape)
+
+                    logits, attn_scores = self._forward_with_attention(model, features)
                     probs = torch.softmax(logits["logits"], dim=1)
                     all_outputs.append(probs[0, 1].cpu().item())  # prob. clase 1
                     all_attentions.append(attn_scores)
                     total_slides += 1
+
+                    # Free per-slide GPU tensors; fragmentation from large bags
+                    # otherwise accumulates across the validation set.
+                    del features, logits, probs
+                    if device.type == "cuda":
+                        torch.cuda.empty_cache()
+
         # Convert lists to numpy arrays (handles both scalars and arrays)
         # List contains scalars (variable patches mode)
         all_outputs = np.array(all_outputs)

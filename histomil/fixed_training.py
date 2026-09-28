@@ -217,6 +217,15 @@ class FixedParameterTrainer:
                 self.feature_extractor,
                 **self.params,
             ).to(device)
+            if self.mil == "wikg":
+                # Lazy import avoids circular import via histomil.__init__.
+                from histomil.predict import patch_wikg_avoid_nxn
+
+                patch_wikg_avoid_nxn(model)
+                self.logger.info(
+                    "WiKG: using chunked top-k attention "
+                    "(avoids full N×N matrices on large WSIs)"
+                )
 
             model, train_metrics, checkpoint = train(
                 model=model,

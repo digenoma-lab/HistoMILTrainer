@@ -108,6 +108,105 @@ def transformer_cls_attention(model, features: torch.Tensor) -> np.ndarray:
     return attn_row[0, 1:].detach().cpu().numpy()
 
 
+def _unwrap_wikg(model):
+    """Return the underlying WIKGMIL module (handles HF PreTrained wrapper)."""
+    if hasattr(model, "model") and hasattr(model.model, "W_head"):
+        return model.model
+    return model
+
+
+def _chunked_topk(e_h: torch.Tensor, e_t: torch.Tensor, k: int, scale: float, chunk_size: int = 1024):
+    """
+    Row-wise top-k of (e_h @ e_t^T) * scale without materializing the full N×N matrix.
+
+    Processes query rows in chunks of ``chunk_size``; peak extra memory is O(chunk_size · N).
+    """
+    batch_size, n_nodes, _ = e_h.shape
+    k = min(k, n_nodes)
+    topk_weight = e_h.new_empty(batch_size, n_nodes, k)
+    topk_index = torch.empty(
+        batch_size, n_nodes, k, device=e_h.device, dtype=torch.long
+    )
+    e_t_t = e_t.transpose(-2, -1)
+    for start in range(0, n_nodes, chunk_size):
+        end = min(start + chunk_size, n_nodes)
+        logits = torch.matmul(e_h[:, start:end, :], e_t_t) * scale
+        weight, index = torch.topk(logits, k=k, dim=-1)
+        topk_weight[:, start:end] = weight
+        topk_index[:, start:end] = index
+        del logits
+    return topk_weight, topk_index
+
+
+def _wikg_row_mean_attention(topk_prob: torch.Tensor, topk_index: torch.Tensor) -> torch.Tensor:
+    """
+    Mean over query rows of the sparse top-k softmax attention.
+
+    Equivalent to ``full_attn.mean(dim=-2)`` / ``attn.mean(axis=0)`` after squeeze,
+    but uses O(N · topk) memory.
+    """
+    batch_size, n_nodes, _ = topk_index.shape
+    scores = topk_prob.new_zeros(batch_size, n_nodes)
+    scores.scatter_add_(
+        1, topk_index.reshape(batch_size, -1), topk_prob.reshape(batch_size, -1)
+    )
+    return scores / float(n_nodes)
+
+
+def patch_wikg_avoid_nxn(model) -> None:
+    """
+    Monkey-patch WiKG ``forward_attention`` so large WSIs do not allocate N×N tensors.
+
+    Upstream WiKG builds ``attn_logit = e_h @ e_t^T`` (and a dense ``full_attn``), which
+    OOMs around ~50k patches (~12 GB). Attention logged for heatmaps becomes the
+    per-patch row-mean of the sparse top-k graph (shape ``(B, N)``).
+    """
+    mil = _unwrap_wikg(model)
+    if getattr(mil, "_histomil_chunked_attn", False):
+        return
+
+    def forward_attention(h: torch.Tensor, attn_only: bool = False, **kwargs):
+        h = mil.patch_embed(h)
+        h = (h + h.mean(dim=1, keepdim=True)) * 0.5
+
+        e_h = mil.W_head(h)
+        e_t = mil.W_tail(h)
+
+        topk_weight, topk_index = _chunked_topk(
+            e_h, e_t, k=mil.topk, scale=mil.scale
+        )
+        topk_prob = F.softmax(topk_weight, dim=-1)
+        # Compact stand-in for the old dense (B, N, N) matrix.
+        mean_attn = _wikg_row_mean_attention(topk_prob, topk_index)
+
+        batch_indices = torch.arange(e_t.size(0), device=h.device).view(-1, 1, 1)
+        Nb_h = e_t[batch_indices, topk_index]
+
+        eh_r = torch.mul(topk_prob.unsqueeze(-1), Nb_h)
+        gate = torch.tanh(e_h.unsqueeze(2).expand_as(Nb_h) + eh_r)
+        ka_weight = torch.einsum("bnik,bnik->bni", gate, Nb_h)
+        ka_prob = F.softmax(ka_weight, dim=-1).unsqueeze(-1)
+        e_Nh = torch.sum(ka_prob * Nb_h, dim=2)
+
+        if mil.agg_type == "gcn":
+            embedding = mil.activation(mil.linear(e_h + e_Nh))
+        elif mil.agg_type == "sage":
+            embedding = mil.activation(mil.linear(torch.cat([e_h, e_Nh], dim=-1)))
+        elif mil.agg_type == "bi-interaction":
+            sum_embedding = mil.activation(mil.linear1(e_h + e_Nh))
+            bi_embedding = mil.activation(mil.linear2(e_h * e_Nh))
+            embedding = sum_embedding + bi_embedding
+        else:
+            raise NotImplementedError(f"Aggregation type '{mil.agg_type}' not supported.")
+
+        if attn_only:
+            return mean_attn
+        return embedding, mean_attn
+
+    mil.forward_attention = forward_attention
+    mil._histomil_chunked_attn = True
+
+
 class Predictor:
     SEED = 2
     # Variable-length bags are processed one slide at a time; keep loader batch=1
@@ -180,8 +279,9 @@ class Predictor:
 
         attn_scores = attn["attention"].squeeze().cpu().numpy()
         if self.mil == "wikg":
-            # Geo attention score: average over the patch dimension
-            attn_scores = attn_scores.mean(axis=0)
+            # Legacy dense (N, N) → mean over queries; patched path already returns (N,).
+            if attn_scores.ndim == 2:
+                attn_scores = attn_scores.mean(axis=0)
         if self.mil == "dsmil":
             # Only keep the attention score for the second class (positive)
             attn_scores = attn_scores[:, 1]
@@ -197,6 +297,12 @@ class Predictor:
         if self.mil == "transformer":
             self.logger.info(
                 "Transformer: extracting CLS attention in O(N) memory "
+                "(avoids full N×N attention matrices on large WSIs)"
+            )
+        if self.mil == "wikg":
+            patch_wikg_avoid_nxn(model)
+            self.logger.info(
+                "WiKG: using chunked top-k attention "
                 "(avoids full N×N attention matrices on large WSIs)"
             )
         model.eval()

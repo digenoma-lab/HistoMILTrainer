@@ -16,6 +16,7 @@ from histomil import (
     import_model,
     variable_patches_collate_fn,
 )
+from histomil.predict import patch_wikg_avoid_nxn
 from histomil.train import train, test
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -189,6 +190,8 @@ class GridSearch:
                 mil = import_model(
                     self.mil, self.feature_extractor, **params
                 ).to(device)
+                if self.mil == "wikg":
+                    patch_wikg_avoid_nxn(mil)
 
                 self.logger.info(f"Training model for fold {fold}")
                 _, train_metrics, checkpoint = train(
@@ -260,6 +263,8 @@ class GridSearch:
             mil = import_model(
                 self.mil, self.feature_extractor, **clean_params
             ).to(device)
+            if self.mil == "wikg":
+                patch_wikg_avoid_nxn(mil)
             mil.load_state_dict(torch.load(row["model_checkpoint"]))
 
             self.logger.info(f"Evaluating model on test set")
